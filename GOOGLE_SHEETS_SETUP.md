@@ -88,12 +88,12 @@ function updateMasterDues(ss, shopName, monthColName, cost) {
 2.Select Web App.\
 3.Set "Execute as" to Me.\
 4.Set "Who has access" to Anyone.\
-5.Click Deploy and copy the Web App URL.\
+5.Click Deploy and copy the Web App URL.
 
 ## Step 4: Link to App
 1.Open the EatUp app on your phone.\
 2.Go to Settings and paste your URL.\
-3.Your sales will now sync automatically!\
+3.Your sales will now sync automatically!
 
 
 

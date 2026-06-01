@@ -59,6 +59,21 @@ interface SalesDao {
     @Query("UPDATE orders SET isSynced = 0")
     suspend fun markAllAsUnsynced()
 
+    @Query("DELETE FROM order_line_items WHERE orderId = :orderId")
+    suspend fun deleteLineItemsForOrder(orderId: Long)
+
+    @Update
+    suspend fun updateOrder(order: OrderEntity)
+
+    @Query("DELETE FROM restaurants")
+    suspend fun clearRestaurants()
+
+    @Query("DELETE FROM menu_items")
+    suspend fun clearMenuItems()
+
+    @Query("DELETE FROM orders")
+    suspend fun clearOrders()
+
     @Query("SELECT * FROM order_line_items")
     fun getAllLineItems(): Flow<List<OrderLineItemEntity>>
 

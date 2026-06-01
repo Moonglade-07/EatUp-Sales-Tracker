@@ -16,6 +16,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.work.WorkManager
 import com.example.myapplication.data.local.AppDatabase
 import com.example.myapplication.data.repository.SalesRepository
@@ -123,7 +125,8 @@ class MainActivity : ComponentActivity() {
                             DashboardScreen(
                                 viewModel = viewModel,
                                 onMenuClick = { scope.launch { drawerState.open() } },
-                                onNavigateToCreateOrder = { navController.navigate("create_order") }
+                                onNavigateToCreateOrder = { navController.navigate("create_order") },
+                                onNavigateToEditOrder = { id -> navController.navigate("edit_order/$id") }
                             )
                         }
                         composable("catalog") {
@@ -160,6 +163,17 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 viewModel = viewModel,
                                 onMenuClick = { scope.launch { drawerState.open() } }
+                            )
+                        }
+                        composable(
+                            route = "edit_order/{orderId}",
+                            arguments = listOf(navArgument("orderId") { type = NavType.LongType })
+                        ) { backStackEntry ->
+                            val orderId = backStackEntry.arguments?.getLong("orderId") ?: 0L
+                            EditOrderScreen(
+                                viewModel = viewModel,
+                                orderId = orderId,
+                                onBack = { navController.popBackStack() }
                             )
                         }
                     }

@@ -27,7 +27,8 @@ import kotlinx.coroutines.launch
 fun DashboardScreen(
     viewModel: SalesViewModel,
     onMenuClick: () -> Unit,
-    onNavigateToCreateOrder: () -> Unit
+    onNavigateToCreateOrder: () -> Unit,
+    onNavigateToEditOrder: (Long) -> Unit
 ) {
     val orders by viewModel.todayOrders.collectAsState()
     val syncStatus by viewModel.syncStatus.collectAsState()
@@ -76,7 +77,7 @@ fun DashboardScreen(
             
             LazyColumn {
                 items(orders) { order ->
-                    ExpandableOrderRow(order, viewModel)
+                    ExpandableOrderRow(order, viewModel, onEdit = { onNavigateToEditOrder(order.id) })
                 }
             }
         }
@@ -125,7 +126,7 @@ fun SummaryCard(count: Int, sales: Double, profit: Double, title: String = "Toda
 }
 
 @Composable
-fun ExpandableOrderRow(order: OrderEntity, viewModel: SalesViewModel) {
+fun ExpandableOrderRow(order: OrderEntity, viewModel: SalesViewModel, onEdit: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val lineItems by viewModel.getLineItemsForOrder(order.id).collectAsState(emptyList())
 
@@ -147,10 +148,15 @@ fun ExpandableOrderRow(order: OrderEntity, viewModel: SalesViewModel) {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text("Profit: ₹${"%.2f".format(order.profit)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Icon(
-                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { onEdit() }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp))
+                        }
+                        Icon(
+                            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null
+                        )
+                    }
                 }
             }
             
@@ -203,8 +209,15 @@ fun OrderSummaryRow(label: String, amount: Double, color: androidx.compose.ui.gr
 fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
     var showAddRestaurant by remember { mutableStateOf(false) }
     var showAddItem by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    
     val restaurants by viewModel.restaurants.collectAsState()
-    val items by viewModel.allMenuItems.collectAsState()
+    val allItems by viewModel.allMenuItems.collectAsState()
+    
+    val filteredItems = remember(allItems, searchQuery) {
+        if (searchQuery.isBlank()) allItems
+        else allItems.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    }
 
     Scaffold(
         topBar = {
@@ -219,6 +232,17 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search items...") },
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                shape = MaterialTheme.shapes.medium
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -254,7 +278,7 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             
             LazyColumn {
-                items(items) { item ->
+                items(filteredItems) { item ->
                     val restaurantName = restaurants.find { it.id == item.restaurantId }?.name ?: "Unknown"
                     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         ListItem(
@@ -284,7 +308,13 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             title = { Text("Add Restaurant") },
             text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Restaurant Name") }, modifier = Modifier.fillMaxWidth()) },
             confirmButton = {
-                Button(onClick = { if (name.isNotBlank()) { viewModel.addRestaurant(name); showAddRestaurant = false } }) { Text("Save") }
+                Button(onClick = { 
+                    if (name.isNotBlank()) { 
+                        viewModel.addRestaurant(name)
+                        viewModel.backupToCloud()
+                        showAddRestaurant = false 
+                    } 
+                }) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showAddRestaurant = false }) { Text("Cancel") } }
         )
@@ -341,7 +371,11 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                 }
             },
             confirmButton = {
-                Button(onClick = { viewModel.addMenuItem(selectedRestId, name, cost.toDoubleOrNull() ?: 0.0, list.toDoubleOrNull() ?: 0.0); showAddItem = false }) { Text("Save") }
+                Button(onClick = { 
+                    viewModel.addMenuItem(selectedRestId, name, cost.toDoubleOrNull() ?: 0.0, list.toDoubleOrNull() ?: 0.0)
+                    viewModel.backupToCloud()
+                    showAddItem = false 
+                }) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { showAddItem = false }) { Text("Cancel") } }
         )
@@ -356,6 +390,7 @@ fun CreateOrderScreen(viewModel: SalesViewModel, onBack: () -> Unit) {
     val selectedItems by viewModel.selectedItems.collectAsState()
     var deliveryCharge by remember { mutableStateOf("") }
     var discount by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -366,15 +401,25 @@ fun CreateOrderScreen(viewModel: SalesViewModel, onBack: () -> Unit) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
-            Text("Catalog (Grouped by Restaurant)", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search items to add...") },
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                shape = MaterialTheme.shapes.medium
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
             
             LazyColumn(modifier = Modifier.weight(1f)) {
                 restaurants.forEach { restaurant ->
-                    val restaurantItems = allItems.filter { it.restaurantId == restaurant.id }
+                    val restaurantItems = allItems.filter { 
+                        it.restaurantId == restaurant.id && (searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true))
+                    }
                     if (restaurantItems.isNotEmpty()) {
                         item {
-                            var expanded by remember { mutableStateOf(false) }
+                            var expanded by remember { mutableStateOf(searchQuery.isNotBlank()) }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -417,6 +462,93 @@ fun CreateOrderScreen(viewModel: SalesViewModel, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 enabled = selectedItems.isNotEmpty()
             ) { Text("Confirm & Save Order", style = MaterialTheme.typography.titleMedium) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditOrderScreen(viewModel: SalesViewModel, orderId: Long, onBack: () -> Unit) {
+    val restaurants by viewModel.restaurants.collectAsState()
+    val allItems by viewModel.allMenuItems.collectAsState()
+    val selectedItems by viewModel.selectedItems.collectAsState()
+    
+    // For editing, we pre-fill based on existing order
+    val todayOrders by viewModel.todayOrders.collectAsState()
+    val order = todayOrders.find { it.id == orderId }
+    
+    var deliveryCharge by remember { mutableStateOf(order?.deliveryCharge?.toString() ?: "") }
+    var discount by remember { mutableStateOf(order?.discount?.toString() ?: "") }
+    var searchQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(orderId) {
+        viewModel.startEditingOrder(orderId)
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Edit Order #${order?.dailyOrderNumber ?: ""}") },
+                navigationIcon = { IconButton(onClick = { viewModel.clearOrder(); onBack() }) { Icon(Icons.Default.Close, null) } }
+            )
+        }
+    ) { padding ->
+        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
+            Text("Modify Items", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                placeholder = { Text("Search items...") },
+                leadingIcon = { Icon(Icons.Default.Search, null) }
+            )
+            
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                restaurants.forEach { restaurant ->
+                    val restaurantItems = allItems.filter { it.restaurantId == restaurant.id && (searchQuery.isBlank() || it.name.contains(searchQuery, ignoreCase = true)) }
+                    if (restaurantItems.isNotEmpty()) {
+                        item {
+                            var expanded by remember { mutableStateOf(true) }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).clickable { expanded = !expanded }.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(restaurant.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+                            }
+                            if (expanded) {
+                                Column {
+                                    restaurantItems.forEach { item ->
+                                        val qty = selectedItems[item] ?: 0
+                                        Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(item.name)
+                                                Text("₹${item.listPrice}", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            IconButton(onClick = { viewModel.removeItemFromOrder(item) }) { Icon(Icons.Default.RemoveCircleOutline, null) }
+                                            Text("$qty", fontWeight = FontWeight.Bold)
+                                            IconButton(onClick = { viewModel.addItemToOrder(item) }) { Icon(Icons.Default.AddCircleOutline, null) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = deliveryCharge, onValueChange = { deliveryCharge = it }, label = { Text("Delivery") }, modifier = Modifier.weight(1f), prefix = { Text("₹") })
+                OutlinedTextField(value = discount, onValueChange = { discount = it }, label = { Text("Discount") }, modifier = Modifier.weight(1f), prefix = { Text("₹") })
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = { 
+                    viewModel.updateOrder(orderId, deliveryCharge.toDoubleOrNull() ?: 0.0, discount.toDoubleOrNull() ?: 0.0)
+                    onBack()
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) { Text("Update Order Records", style = MaterialTheme.typography.titleMedium) }
         }
     }
 }
@@ -474,7 +606,7 @@ fun HistoryScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                 val grouped = filteredOrders.groupBy { SimpleDateFormat("EEEE, MMM dd", Locale.getDefault()).format(Date(it.date)) }
                 grouped.forEach { (date, dailyOrders) ->
                     item { Text(date, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.secondary) }
-                    items(dailyOrders) { order -> ExpandableOrderRow(order, viewModel) }
+                    items(dailyOrders) { order -> ExpandableOrderRow(order, viewModel, onEdit = {}) }
                 }
             }
         }
@@ -642,6 +774,25 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(32.dp))
             
+            Text("Cloud Recovery", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    viewModel.fullRestoreFromCloud()
+                    scope.launch { snackbarHostState.showSnackbar("Restoring data from Cloud...") }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Icon(Icons.Default.CloudDownload, null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Restore All Data from Cloud")
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+            
             Text("App Information", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             ListItem(
@@ -668,12 +819,6 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Force Re-sync All Data")
             }
-            Text(
-                "Use this if you deleted your Google Sheet or want to refresh all records.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 8.dp)
-            )
         }
     }
 }

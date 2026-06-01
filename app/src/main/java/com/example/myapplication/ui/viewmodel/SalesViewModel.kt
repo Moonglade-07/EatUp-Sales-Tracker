@@ -14,8 +14,13 @@ import com.example.myapplication.util.UpdateManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 class SalesViewModel(
     private val repository: SalesRepository,
@@ -89,6 +94,73 @@ class SalesViewModel(
         repository.createOrder(itemsWithNames, deliveryCharge, discount)
         clearOrder()
         triggerSync()
+    }
+
+    // Editing Logic
+    fun startEditingOrder(orderId: Long) {
+        viewModelScope.launch {
+            val lineItems = repository.getLineItemsForOrder(orderId).first()
+            val menuItems = repository.getAllMenuItems().first()
+            
+            val newSelection = mutableMapOf<MenuItemEntity, Int>()
+            lineItems.forEach { line ->
+                val menu = menuItems.find { it.id == line.menuItemId }
+                if (menu != null) newSelection[menu] = line.quantity
+            }
+            _selectedItems.value = newSelection
+        }
+    }
+
+    fun updateOrder(orderId: Long, delivery: Double, discount: Double) = viewModelScope.launch {
+        val itemsWithNames = _selectedItems.value.map { (item, qty) ->
+            val restaurantName = restaurants.value.find { it.id == item.restaurantId }?.name ?: "Unknown"
+            Triple(item, restaurantName, qty)
+        }
+        repository.updateOrder(orderId, itemsWithNames, delivery, discount)
+        clearOrder()
+        triggerSync()
+    }
+
+    // Cloud Backup & Restore
+    fun backupToCloud() = viewModelScope.launch {
+        val url = googleSheetsUrl.value
+        if (url.isBlank()) return@launch
+        
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://script.google.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+        val api = retrofit.create(SheetsApiService::class.java)
+        
+        try {
+            api.backupCatalog(url, CatalogBackupRequest(restaurants.value, allMenuItems.value))
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    fun fullRestoreFromCloud() = viewModelScope.launch {
+        val url = googleSheetsUrl.value
+        if (url.isBlank()) return@launch
+
+        val okHttpClient = OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://script.google.com/")
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+        val api = retrofit.create(SheetsApiService::class.java)
+
+        try {
+            val response = api.fullRestore(url)
+            if (response.isSuccessful && response.body() != null) {
+                repository.restoreData(response.body()!!)
+            }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     fun exportData() {

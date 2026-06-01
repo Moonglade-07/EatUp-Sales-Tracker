@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myapplication.data.local.AppDatabase
+import com.example.myapplication.data.repository.SalesRepository
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -81,7 +82,8 @@ class SyncWorker(
                         monthName = monthName,
                         delivery = order.deliveryCharge,
                         discount = order.discount,
-                        shops = shopGroupings
+                        shops = shopGroupings,
+                        isEdit = true // Always send as edit to handle in-place updates if already present
                     )
 
                     val response = api.syncOrder(syncUrl, request)

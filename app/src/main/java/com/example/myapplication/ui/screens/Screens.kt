@@ -797,7 +797,7 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             ListItem(
                 headlineContent = { Text("Version") },
-                supportingContent = { Text("1.0.0 (Pro Version)") },
+                supportingContent = { Text("1.2.0 (Stable Version)") },
                 trailingContent = {
                     TextButton(onClick = { viewModel.checkForUpdates() }) {
                         Text("Check for Updates")

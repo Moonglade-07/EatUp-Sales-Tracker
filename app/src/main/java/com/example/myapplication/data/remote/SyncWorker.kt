@@ -5,7 +5,6 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myapplication.data.local.AppDatabase
-import com.example.myapplication.data.repository.SalesRepository
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -29,12 +28,12 @@ class SyncWorker(
             val prefs = applicationContext.getSharedPreferences("eatup_prefs", Context.MODE_PRIVATE)
             val settingsUrl = prefs.getString("google_sheets_url", "") ?: ""
             
-            val syncUrl = if (settingsUrl.isNotBlank()) settingsUrl else "https://script.google.com/macros/s/AKfycbyQpSth7EBcKLC_TtDQsbSLsp4ws_Bgn3sYjPn7g_CuwfxNQ-5tIM3Z1dV0EfXqZZ4I/exec"
+            val syncUrl = settingsUrl
 
-            if (syncUrl.isBlank() || syncUrl.contains("REPLACE_WITH_YOUR_ID")) return Result.success()
-
-            val unsyncedOrders = dao.getUnsyncedOrders()
-            if (unsyncedOrders.isEmpty()) return Result.success()
+            if (syncUrl.isBlank()) {
+                Log.w(TAG, "No Google Sheets URL found in settings. Sync skipped.")
+                return Result.success()
+            }
 
             val okHttpClient = OkHttpClient.Builder()
                 .followRedirects(true)
@@ -50,6 +49,18 @@ class SyncWorker(
                 .build()
             
             val api = retrofit.create(SheetsApiService::class.java)
+
+            // ALWAYS BACKUP CATALOG BEFORE SYNCING ORDERS
+            try {
+                val restaurants = dao.getAllRestaurants().first()
+                val menuItems = dao.getAllMenuItems().first()
+                api.backupCatalog(syncUrl, CatalogBackupRequest(restaurants, menuItems))
+            } catch (e: Exception) {
+                Log.e(TAG, "Catalog backup failed: ${e.message}")
+            }
+
+            val unsyncedOrders = dao.getUnsyncedOrders()
+            if (unsyncedOrders.isEmpty()) return Result.success()
 
             var allSuccess = true
             unsyncedOrders.forEach { order ->
@@ -83,7 +94,7 @@ class SyncWorker(
                         delivery = order.deliveryCharge,
                         discount = order.discount,
                         shops = shopGroupings,
-                        isEdit = true // Always send as edit to handle in-place updates if already present
+                        isEdit = true
                     )
 
                     val response = api.syncOrder(syncUrl, request)

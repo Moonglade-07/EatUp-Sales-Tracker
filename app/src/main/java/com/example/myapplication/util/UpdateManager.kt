@@ -22,7 +22,7 @@ interface GitHubUpdateService {
 
 class UpdateManager(private val context: Context) {
     
-    private val currentVersionCode = 1 // Match this with build.gradle
+    private val currentVersionCode = 3 // Match this with build.gradle
     
     private val retrofit = Retrofit.Builder()
         .baseUrl("https://raw.githubusercontent.com/")

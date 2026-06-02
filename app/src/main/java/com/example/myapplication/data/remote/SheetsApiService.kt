@@ -31,11 +31,20 @@ data class CatalogBackupRequest(
     val menuItems: List<MenuItemEntity>
 )
 
+data class RestoreLineItem(
+    val itemName: String,
+    val restaurantName: String,
+    val quantity: Int,
+    val costPriceAtTime: Double,
+    val listPriceAtTime: Double,
+    val syncId: String // ID of the parent order
+)
+
 data class CloudRestoreResponse(
     val restaurants: List<RestaurantEntity>,
     val menuItems: List<MenuItemEntity>,
     val orders: List<OrderEntity>,
-    val lineItems: List<OrderLineItemEntity>
+    val lineItems: List<RestoreLineItem>
 )
 
 interface SheetsApiService {

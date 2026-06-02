@@ -132,10 +132,43 @@ class SalesRepository(private val salesDao: SalesDao) {
 
     suspend fun restoreData(response: CloudRestoreResponse) {
         clearAllData()
-        response.restaurants.forEach { salesDao.insertRestaurant(it) }
-        response.menuItems.forEach { salesDao.insertMenuItem(it) }
-        response.orders.forEach { salesDao.insertOrder(it) }
-        response.lineItems.forEach { salesDao.insertLineItem(it) }
+        
+        // 1. Restore Restaurants and create ID mapping
+        val restaurantIdMap = mutableMapOf<Long, Long>()
+        response.restaurants.forEach { oldRest ->
+            val newId = salesDao.insertRestaurant(oldRest.copy(id = 0))
+            restaurantIdMap[oldRest.id] = newId
+        }
+
+        // 2. Restore Menu Items using mapping
+        response.menuItems.forEach { oldItem ->
+            val newRestId = restaurantIdMap[oldItem.restaurantId]
+            if (newRestId != null) {
+                salesDao.insertMenuItem(oldItem.copy(id = 0, restaurantId = newRestId))
+            }
+        }
+
+        // 3. Restore Orders and link LineItems by SyncID
+        val orderSyncMap = mutableMapOf<String, Long>()
+        response.orders.forEach { oldOrder ->
+            val newOrderId = salesDao.insertOrder(oldOrder.copy(id = 0))
+            orderSyncMap[oldOrder.syncId] = newOrderId
+        }
+
+        // 4. Restore Line Items
+        response.lineItems.forEach { item ->
+            val parentOrderId = orderSyncMap[item.syncId] ?: return@forEach
+            // We insert items even if we can't link back to a MenuID, to preserve details
+            salesDao.insertLineItem(OrderLineItemEntity(
+                orderId = parentOrderId,
+                menuItemId = 0, // Detail preserved via itemName
+                itemName = item.itemName,
+                restaurantName = item.restaurantName,
+                quantity = item.quantity,
+                costPriceAtTime = item.costPriceAtTime,
+                listPriceAtTime = item.listPriceAtTime
+            ))
+        }
     }
 
     fun getAllOrders(): Flow<List<OrderEntity>> = salesDao.getAllOrders()

@@ -10,10 +10,9 @@ Create a new Google Sheet and name it "EatUp Sales Records".
 
 ```
 /**
- * EatUp Sales Tracker - Absolute Definitive Edition (v12.9)
+ * EatUp Sales Tracker
  * =========================================================
  * 
- * This is the final, fully expanded, and most stable accounting engine.
  * It is built to ensure 100% accuracy across both legacy and new data.
  * 
  * KEY FEATURES INCLUDED:
@@ -48,7 +47,7 @@ function onOpen() {
 
 /** 
  * COMPATIBILITY BRIDGES
- * These map every possible old button name to the latest Titan v12.9 logic.
+ * These map every possible old button name to the latest logic.
  */
 function repairAndSortSheet() { 
   nuclearRepairAllSheets(); 

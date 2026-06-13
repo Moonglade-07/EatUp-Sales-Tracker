@@ -12,7 +12,8 @@ data class ShopSyncData(
     val items: String,
     val foodAmount: Double,
     val shopProfit: Double,
-    val shopCost: Double
+    val shopCost: Double,
+    val itemsMetadata: String // JSON string for perfect recovery
 )
 
 data class MultiRowSyncRequest(
@@ -23,7 +24,8 @@ data class MultiRowSyncRequest(
     val delivery: Double,
     val discount: Double,
     val shops: List<ShopSyncData>,
-    val isEdit: Boolean = false
+    val isEdit: Boolean = false,
+    val isDelete: Boolean = false
 )
 
 data class CatalogBackupRequest(

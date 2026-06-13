@@ -11,6 +11,7 @@ import com.example.myapplication.data.repository.SalesRepository
 import com.example.myapplication.util.AppVersionResponse
 import com.example.myapplication.util.ExportService
 import com.example.myapplication.util.UpdateManager
+import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +21,8 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.TimeUnit
 
 class SalesViewModel(
@@ -64,11 +67,26 @@ class SalesViewModel(
     private val _selectedItems = MutableStateFlow<Map<MenuItemEntity, Int>>(emptyMap())
     val selectedItems = _selectedItems.asStateFlow()
 
+    private val _editDeliveryCharge = MutableStateFlow("")
+    val editDeliveryCharge = _editDeliveryCharge.asStateFlow()
+
+    private val _editDiscount = MutableStateFlow("")
+    val editDiscount = _editDiscount.asStateFlow()
+
+    private val _editOrderDate = MutableStateFlow(System.currentTimeMillis())
+    val editOrderDate = _editOrderDate.asStateFlow()
+
+    fun setEditOrderDate(millis: Long) { _editOrderDate.value = millis }
+
     fun addRestaurant(name: String) = viewModelScope.launch { repository.insertRestaurant(name) }
     fun deleteRestaurant(restaurant: RestaurantEntity) = viewModelScope.launch { repository.deleteRestaurant(restaurant) }
 
     fun addMenuItem(restaurantId: Long, name: String, cost: Double, list: Double) = 
         viewModelScope.launch { repository.insertMenuItem(restaurantId, name, cost, list) }
+    
+    fun editMenuItem(item: MenuItemEntity) = 
+        viewModelScope.launch { repository.updateMenuItem(item) }
+
     fun deleteMenuItem(item: MenuItemEntity) = viewModelScope.launch { repository.deleteMenuItem(item) }
 
     fun addItemToOrder(item: MenuItemEntity) {
@@ -84,21 +102,39 @@ class SalesViewModel(
         _selectedItems.value = current
     }
 
-    fun clearOrder() { _selectedItems.value = emptyMap() }
+    fun clearOrder() { 
+        _selectedItems.value = emptyMap() 
+        _editDeliveryCharge.value = ""
+        _editDiscount.value = ""
+    }
+
+    private val _orderDate = MutableStateFlow(System.currentTimeMillis())
+    val orderDate = _orderDate.asStateFlow()
+
+    fun setOrderDate(millis: Long) { _orderDate.value = millis }
 
     fun submitOrder(deliveryCharge: Double, discount: Double) = viewModelScope.launch {
         val itemsWithNames = _selectedItems.value.map { (item, qty) ->
             val restaurantName = restaurants.value.find { it.id == item.restaurantId }?.name ?: "Unknown"
             Triple(item, restaurantName, qty)
         }
-        repository.createOrder(itemsWithNames, deliveryCharge, discount)
+        repository.createOrder(itemsWithNames, deliveryCharge, discount, _orderDate.value)
         clearOrder()
+        setOrderDate(System.currentTimeMillis())
         triggerSync()
     }
 
     // Editing Logic
     fun startEditingOrder(orderId: Long) {
         viewModelScope.launch {
+            val orders = repository.getAllOrders().first()
+            val order = orders.find { it.id == orderId }
+            if (order != null) {
+                _editDeliveryCharge.value = if (order.deliveryCharge > 0) order.deliveryCharge.toString() else ""
+                _editDiscount.value = if (order.discount > 0) order.discount.toString() else ""
+                _editOrderDate.value = order.timestamp
+            }
+
             val lineItems = repository.getLineItemsForOrder(orderId).first()
             val menuItems = repository.getAllMenuItems().first()
             
@@ -106,6 +142,10 @@ class SalesViewModel(
             lineItems.forEach { line ->
                 val menu = menuItems.find { it.id == line.menuItemId }
                 if (menu != null) newSelection[menu] = line.quantity
+                else {
+                   val tempMenu = MenuItemEntity(id = line.menuItemId, restaurantId = 0, name = line.itemName, costPrice = line.costPriceAtTime, listPrice = line.listPriceAtTime)
+                   newSelection[tempMenu] = line.quantity
+                }
             }
             _selectedItems.value = newSelection
         }
@@ -116,9 +156,44 @@ class SalesViewModel(
             val restaurantName = restaurants.value.find { it.id == item.restaurantId }?.name ?: "Unknown"
             Triple(item, restaurantName, qty)
         }
-        repository.updateOrder(orderId, itemsWithNames, delivery, discount)
+        repository.updateOrder(orderId, itemsWithNames, delivery, discount, _editOrderDate.value)
         clearOrder()
         triggerSync()
+    }
+
+    fun deleteOrder(orderId: Long) = viewModelScope.launch {
+        val url = googleSheetsUrl.value
+        if (url.isNotBlank()) {
+            val orders = repository.getAllOrders().first()
+            val order = orders.find { it.id == orderId }
+            if (order != null) {
+                // Send explicit delete request to cloud
+                val retrofit = Retrofit.Builder()
+                    .baseUrl("https://script.google.com/")
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                val api = retrofit.create(SheetsApiService::class.java)
+                
+                val dateObj = Date(order.timestamp)
+                val monthName = SimpleDateFormat("MMM", Locale.getDefault()).format(dateObj).uppercase() + " sales"
+                val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(dateObj)
+
+                val deleteRequest = MultiRowSyncRequest(
+                    syncId = order.syncId,
+                    orderNumber = order.dailyOrderNumber,
+                    date = dateStr,
+                    monthName = monthName,
+                    delivery = 0.0,
+                    discount = 0.0,
+                    shops = emptyList(),
+                    isDelete = true
+                )
+                try {
+                    api.syncOrder(url, deleteRequest)
+                } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+        repository.deleteOrderLocally(orderId)
     }
 
     // Cloud Backup & Restore

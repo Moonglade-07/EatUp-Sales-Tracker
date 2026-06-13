@@ -138,7 +138,8 @@ class MainActivity : ComponentActivity() {
                         composable("history") {
                             HistoryScreen(
                                 viewModel = viewModel,
-                                onMenuClick = { scope.launch { drawerState.open() } }
+                                onMenuClick = { scope.launch { drawerState.open() } },
+                                onNavigateToEditOrder = { id -> navController.navigate("edit_order/$id") }
                             )
                         }
                         composable("insights") {

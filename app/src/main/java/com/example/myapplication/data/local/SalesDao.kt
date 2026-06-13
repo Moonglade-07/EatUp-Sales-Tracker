@@ -23,6 +23,9 @@ interface SalesDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMenuItem(item: MenuItemEntity)
 
+    @Update
+    suspend fun updateMenuItem(item: MenuItemEntity)
+
     @Delete
     suspend fun deleteMenuItem(item: MenuItemEntity)
 
@@ -64,6 +67,9 @@ interface SalesDao {
 
     @Update
     suspend fun updateOrder(order: OrderEntity)
+
+    @Query("DELETE FROM orders WHERE id = :orderId")
+    suspend fun deleteOrder(orderId: Long)
 
     @Query("DELETE FROM restaurants")
     suspend fun clearRestaurants()

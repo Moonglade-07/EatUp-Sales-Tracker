@@ -280,6 +280,8 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             LazyColumn {
                 items(filteredItems) { item ->
                     val restaurantName = restaurants.find { it.id == item.restaurantId }?.name ?: "Unknown"
+                    var showEditItem by remember { mutableStateOf(false) }
+
                     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         ListItem(
                             headlineContent = { Text(item.name, fontWeight = FontWeight.Bold) },
@@ -290,10 +292,43 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                                 }
                             },
                             trailingContent = {
-                                IconButton(onClick = { viewModel.deleteMenuItem(item) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                Row {
+                                    IconButton(onClick = { showEditItem = true }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit")
+                                    }
+                                    IconButton(onClick = { viewModel.deleteMenuItem(item) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                                    }
                                 }
                             }
+                        )
+                    }
+
+                    if (showEditItem) {
+                        var editName by remember { mutableStateOf(item.name) }
+                        var editCost by remember { mutableStateOf(item.costPrice.toString()) }
+                        var editList by remember { mutableStateOf(item.listPrice.toString()) }
+
+                        AlertDialog(
+                            onDismissRequest = { showEditItem = false },
+                            title = { Text("Edit Menu Item") },
+                            text = {
+                                Column {
+                                    OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Item Name") }, modifier = Modifier.fillMaxWidth())
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(value = editCost, onValueChange = { editCost = it }, label = { Text("Cost Price") }, modifier = Modifier.fillMaxWidth())
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(value = editList, onValueChange = { editList = it }, label = { Text("List Price") }, modifier = Modifier.fillMaxWidth())
+                                }
+                            },
+                            confirmButton = {
+                                Button(onClick = { 
+                                    viewModel.editMenuItem(item.copy(name = editName, costPrice = editCost.toDoubleOrNull() ?: item.costPrice, listPrice = editList.toDoubleOrNull() ?: item.listPrice))
+                                    viewModel.backupToCloud()
+                                    showEditItem = false 
+                                }) { Text("Update") }
+                            },
+                            dismissButton = { TextButton(onClick = { showEditItem = false }) { Text("Cancel") } }
                         )
                     }
                 }
@@ -388,15 +423,25 @@ fun CreateOrderScreen(viewModel: SalesViewModel, onBack: () -> Unit) {
     val restaurants by viewModel.restaurants.collectAsState()
     val allItems by viewModel.allMenuItems.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
+    val selectedDateMillis by viewModel.orderDate.collectAsState()
+    
     var deliveryCharge by remember { mutableStateOf("") }
     var discount by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("New Order") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+                actions = {
+                    TextButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.CalendarMonth, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(selectedDateMillis)))
+                    }
+                }
             )
         }
     ) { padding ->
@@ -464,6 +509,21 @@ fun CreateOrderScreen(viewModel: SalesViewModel, onBack: () -> Unit) {
             ) { Text("Confirm & Save Order", style = MaterialTheme.typography.titleMedium) }
         }
     }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { viewModel.setOrderDate(it) }
+                    showDatePicker = false
+                }) { Text("OK") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -473,13 +533,16 @@ fun EditOrderScreen(viewModel: SalesViewModel, orderId: Long, onBack: () -> Unit
     val allItems by viewModel.allMenuItems.collectAsState()
     val selectedItems by viewModel.selectedItems.collectAsState()
     
-    // For editing, we pre-fill based on existing order
-    val todayOrders by viewModel.todayOrders.collectAsState()
-    val order = todayOrders.find { it.id == orderId }
+    val deliveryCharge by viewModel.editDeliveryCharge.collectAsState()
+    val discount by viewModel.editDiscount.collectAsState()
+    val selectedDateMillis by viewModel.editOrderDate.collectAsState()
     
-    var deliveryCharge by remember { mutableStateOf(order?.deliveryCharge?.toString() ?: "") }
-    var discount by remember { mutableStateOf(order?.discount?.toString() ?: "") }
+    val allOrders by viewModel.allOrders.collectAsState()
+    val order = allOrders.find { it.id == orderId }
+    
     var searchQuery by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(orderId) {
         viewModel.startEditingOrder(orderId)
@@ -489,7 +552,17 @@ fun EditOrderScreen(viewModel: SalesViewModel, orderId: Long, onBack: () -> Unit
         topBar = {
             TopAppBar(
                 title = { Text("Edit Order #${order?.dailyOrderNumber ?: ""}") },
-                navigationIcon = { IconButton(onClick = { viewModel.clearOrder(); onBack() }) { Icon(Icons.Default.Close, null) } }
+                navigationIcon = { IconButton(onClick = { viewModel.clearOrder(); onBack() }) { Icon(Icons.Default.Close, null) } },
+                actions = {
+                    TextButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.CalendarMonth, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text(SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(selectedDateMillis)))
+                    }
+                    IconButton(onClick = { showDeleteConfirm = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Order", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
             )
         }
     ) { padding ->
@@ -537,25 +610,70 @@ fun EditOrderScreen(viewModel: SalesViewModel, orderId: Long, onBack: () -> Unit
                 }
             }
             
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = deliveryCharge, onValueChange = { deliveryCharge = it }, label = { Text("Delivery") }, modifier = Modifier.weight(1f), prefix = { Text("₹") })
-                OutlinedTextField(value = discount, onValueChange = { discount = it }, label = { Text("Discount") }, modifier = Modifier.weight(1f), prefix = { Text("₹") })
+            var localDelivery by remember { mutableStateOf("") }
+            var localDiscount by remember { mutableStateOf("") }
+            
+            LaunchedEffect(deliveryCharge, discount) {
+                if (localDelivery.isEmpty() && deliveryCharge.isNotEmpty()) localDelivery = deliveryCharge
+                if (localDiscount.isEmpty() && discount.isNotEmpty()) localDiscount = discount
             }
+
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = localDelivery, onValueChange = { localDelivery = it }, label = { Text("Delivery") }, modifier = Modifier.weight(1f), prefix = { Text("₹") })
+                OutlinedTextField(value = localDiscount, onValueChange = { localDiscount = it }, label = { Text("Discount") }, modifier = Modifier.weight(1f), prefix = { Text("₹") })
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = { 
-                    viewModel.updateOrder(orderId, deliveryCharge.toDoubleOrNull() ?: 0.0, discount.toDoubleOrNull() ?: 0.0)
+                    viewModel.updateOrder(orderId, localDelivery.toDoubleOrNull() ?: 0.0, localDiscount.toDoubleOrNull() ?: 0.0)
                     onBack()
                 },
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) { Text("Update Order Records", style = MaterialTheme.typography.titleMedium) }
         }
     }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Order?") },
+            text = { Text("This will permanently remove the order from your phone and the Google Sheet.") },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.deleteOrder(orderId); onBack() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDateMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { viewModel.setEditOrderDate(it) }
+                    showDatePicker = false
+                }) { Text("OK") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
+fun HistoryScreen(
+    viewModel: SalesViewModel,
+    onMenuClick: () -> Unit,
+    onNavigateToEditOrder: (Long) -> Unit
+) {
     val allOrders by viewModel.allOrders.collectAsState()
     val selectedDateMillis by viewModel.historyDate.collectAsState()
     var showDatePicker by remember { mutableStateOf(false) }
@@ -606,7 +724,9 @@ fun HistoryScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                 val grouped = filteredOrders.groupBy { SimpleDateFormat("EEEE, MMM dd", Locale.getDefault()).format(Date(it.date)) }
                 grouped.forEach { (date, dailyOrders) ->
                     item { Text(date, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.secondary) }
-                    items(dailyOrders) { order -> ExpandableOrderRow(order, viewModel, onEdit = {}) }
+                    items(dailyOrders) { order -> 
+                        ExpandableOrderRow(order, viewModel, onEdit = { onNavigateToEditOrder(order.id) }) 
+                    }
                 }
             }
         }
@@ -797,7 +917,7 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             ListItem(
                 headlineContent = { Text("Version") },
-                supportingContent = { Text("1.2.0 (Stable Version)") },
+                supportingContent = { Text("1.2.5 (Indestructible Version)") },
                 trailingContent = {
                     TextButton(onClick = { viewModel.checkForUpdates() }) {
                         Text("Check for Updates")

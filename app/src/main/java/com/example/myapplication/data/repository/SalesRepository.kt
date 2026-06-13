@@ -30,20 +30,25 @@ class SalesRepository(private val salesDao: SalesDao) {
         ))
     }
 
+    suspend fun updateMenuItem(item: MenuItemEntity) {
+        salesDao.updateMenuItem(item)
+    }
+
     suspend fun deleteMenuItem(item: MenuItemEntity) = salesDao.deleteMenuItem(item)
 
     fun getOrdersForToday(): Flow<List<OrderEntity>> {
-        val today = getStartOfDay()
+        val today = getStartOfDay(System.currentTimeMillis())
         return salesDao.getOrdersForDate(today)
     }
 
     suspend fun createOrder(
         itemsWithRestaurant: List<Triple<MenuItemEntity, String, Int>>,
         deliveryCharge: Double,
-        discount: Double
+        discount: Double,
+        customTimestamp: Long = System.currentTimeMillis()
     ) {
-        val today = getStartOfDay()
-        val nextOrderNumber = (salesDao.getMaxOrderNumberForDate(today) ?: 0) + 1
+        val dateForOrder = getStartOfDay(customTimestamp)
+        val nextOrderNumber = (salesDao.getMaxOrderNumberForDate(dateForOrder) ?: 0) + 1
         
         var totalCost = 0.0
         var totalList = 0.0
@@ -65,7 +70,8 @@ class SalesRepository(private val salesDao: SalesDao) {
         val profit = (totalList - totalCost) + deliveryCharge - discount
 
         val order = OrderEntity(
-            date = today,
+            date = dateForOrder,
+            timestamp = customTimestamp,
             dailyOrderNumber = nextOrderNumber,
             deliveryCharge = deliveryCharge,
             discount = discount,
@@ -84,14 +90,21 @@ class SalesRepository(private val salesDao: SalesDao) {
 
     suspend fun updateOrder(
         orderId: Long,
-        itemsWithRestaurant: List<Triple<MenuItemEntity, String, Int>>,
+        itemsWithNames: List<Triple<MenuItemEntity, String, Int>>,
         deliveryCharge: Double,
-        discount: Double
+        discount: Double,
+        customTimestamp: Long? = null
     ) {
         var totalCost = 0.0
         var totalList = 0.0
         
-        val newLineItems = itemsWithRestaurant.map { (menuItem, restaurantName, qty) ->
+        val currentOrders = salesDao.getAllOrders().first()
+        val currentOrder = currentOrders.find { it.id == orderId } ?: return
+
+        val newTimestamp = customTimestamp ?: currentOrder.timestamp
+        val newDate = getStartOfDay(newTimestamp)
+
+        val newLineItems = itemsWithNames.map { (menuItem, restaurantName, qty) ->
             totalCost += menuItem.costPrice * qty
             totalList += menuItem.listPrice * qty
             OrderLineItemEntity(
@@ -106,11 +119,10 @@ class SalesRepository(private val salesDao: SalesDao) {
         }
 
         val profit = (totalList - totalCost) + deliveryCharge - discount
-        
-        val currentOrders = salesDao.getAllOrders().first()
-        val currentOrder = currentOrders.find { it.id == orderId } ?: return
 
         val updatedOrder = currentOrder.copy(
+            date = newDate,
+            timestamp = newTimestamp,
             deliveryCharge = deliveryCharge,
             discount = discount,
             totalCostPrice = totalCost,
@@ -124,6 +136,11 @@ class SalesRepository(private val salesDao: SalesDao) {
         newLineItems.forEach { salesDao.insertLineItem(it) }
     }
 
+    suspend fun deleteOrderLocally(orderId: Long) {
+        salesDao.deleteLineItemsForOrder(orderId)
+        salesDao.deleteOrder(orderId)
+    }
+
     suspend fun clearAllData() {
         salesDao.clearRestaurants()
         salesDao.clearMenuItems()
@@ -133,14 +150,12 @@ class SalesRepository(private val salesDao: SalesDao) {
     suspend fun restoreData(response: CloudRestoreResponse) {
         clearAllData()
         
-        // 1. Restore Restaurants and create ID mapping
         val restaurantIdMap = mutableMapOf<Long, Long>()
         response.restaurants.forEach { oldRest ->
             val newId = salesDao.insertRestaurant(oldRest.copy(id = 0))
             restaurantIdMap[oldRest.id] = newId
         }
 
-        // 2. Restore Menu Items using mapping
         response.menuItems.forEach { oldItem ->
             val newRestId = restaurantIdMap[oldItem.restaurantId]
             if (newRestId != null) {
@@ -148,20 +163,17 @@ class SalesRepository(private val salesDao: SalesDao) {
             }
         }
 
-        // 3. Restore Orders and link LineItems by SyncID
         val orderSyncMap = mutableMapOf<String, Long>()
         response.orders.forEach { oldOrder ->
             val newOrderId = salesDao.insertOrder(oldOrder.copy(id = 0))
             orderSyncMap[oldOrder.syncId] = newOrderId
         }
 
-        // 4. Restore Line Items
         response.lineItems.forEach { item ->
             val parentOrderId = orderSyncMap[item.syncId] ?: return@forEach
-            // We insert items even if we can't link back to a MenuID, to preserve details
             salesDao.insertLineItem(OrderLineItemEntity(
                 orderId = parentOrderId,
-                menuItemId = 0, // Detail preserved via itemName
+                menuItemId = 0,
                 itemName = item.itemName,
                 restaurantName = item.restaurantName,
                 quantity = item.quantity,
@@ -179,8 +191,9 @@ class SalesRepository(private val salesDao: SalesDao) {
     
     fun getRestaurantInsights(): Flow<List<RestaurantInsight>> = salesDao.getRestaurantInsights()
 
-    private fun getStartOfDay(): Long {
+    private fun getStartOfDay(millis: Long): Long {
         val calendar = Calendar.getInstance()
+        calendar.timeInMillis = millis
         calendar.set(Calendar.HOUR_OF_DAY, 0)
         calendar.set(Calendar.MINUTE, 0)
         calendar.set(Calendar.SECOND, 0)

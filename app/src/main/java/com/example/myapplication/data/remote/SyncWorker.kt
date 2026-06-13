@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myapplication.data.local.AppDatabase
+import com.google.gson.Gson
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -19,6 +20,7 @@ class SyncWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val TAG = "EatUpSync"
+    private val gson = Gson()
 
     override suspend fun doWork(): Result {
         return try {
@@ -73,12 +75,23 @@ class SyncWorker(
                         val shopProfit = items.sumOf { (it.listPriceAtTime - it.costPriceAtTime) * it.quantity }
                         val shopCost = items.sumOf { it.costPriceAtTime * it.quantity }
                         
+                        // Metadata for perfect restore
+                        val metadata = items.map { 
+                            mapOf(
+                                "name" to it.itemName,
+                                "qty" to it.quantity,
+                                "cost" to it.costPriceAtTime,
+                                "list" to it.listPriceAtTime
+                            )
+                        }
+                        
                         ShopSyncData(
                             shopName = shopName,
                             items = itemsStr,
                             foodAmount = foodAmount,
                             shopProfit = shopProfit,
-                            shopCost = shopCost
+                            shopCost = shopCost,
+                            itemsMetadata = gson.toJson(metadata)
                         )
                     }
                     

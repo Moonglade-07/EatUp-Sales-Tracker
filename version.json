@@ -1,6 +1,6 @@
-{ 
-  "versionCode": 3,
-  "versionName": "1.2.0",
-  "downloadUrl": "https://github.com/Moonglade-07/EatUp-Sales-Tracker/releases/download/v1.2.0/EatUp_v1.2.0.apk",
-  "releaseNotes": "Stable V1.2.0: Added Order Editing, Item Search, and Cloud Restore."
+{
+  "versionCode": 5,
+  "versionName": "1.2.5",
+  "downloadUrl": "https://github.com/Moonglade-07/EatUp-Sales-Tracker/releases/download/v1.2.5/Eatup_v1.2.5.apk",
+  "releaseNotes": "v1.2.5 RELEASE: Self-Healing Dues Matrix, Nuclear Repair Tool, and perfect Historical Data Recovery!"
 }

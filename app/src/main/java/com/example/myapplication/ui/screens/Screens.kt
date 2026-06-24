@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
@@ -976,9 +977,19 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             
             Text("App Information", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
+            
+            val context = LocalContext.current
+            val versionName = remember {
+                try {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                } catch (e: Exception) {
+                    "Unknown"
+                }
+            }
+            
             ListItem(
                 headlineContent = { Text("Version") },
-                supportingContent = { Text("1.2.5 (Indestructible Version)") },
+                supportingContent = { Text("$versionName (Titan Suite)") },
                 trailingContent = {
                     TextButton(onClick = { viewModel.checkForUpdates() }) {
                         Text("Check for Updates")

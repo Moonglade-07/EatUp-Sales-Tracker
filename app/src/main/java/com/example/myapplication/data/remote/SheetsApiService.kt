@@ -39,7 +39,7 @@ data class RestoreLineItem(
     val quantity: Int,
     val costPriceAtTime: Double,
     val listPriceAtTime: Double,
-    val syncId: String // ID of the parent order
+    val syncId: String // Matches "syncId" in Apps Script output
 )
 
 data class CloudRestoreResponse(

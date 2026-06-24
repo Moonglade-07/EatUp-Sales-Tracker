@@ -11,7 +11,6 @@ import com.example.myapplication.data.repository.SalesRepository
 import com.example.myapplication.util.AppVersionResponse
 import com.example.myapplication.util.ExportService
 import com.example.myapplication.util.UpdateManager
-import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,8 +37,10 @@ class SalesViewModel(
     val todayOrders = repository.getOrdersForToday().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allOrders = repository.getAllOrders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allLineItems = repository.getAllLineItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val topItems = repository.getTopItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val restaurantInsights = repository.getRestaurantInsights().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    
+    // Monthly Insights Logic
+    val topItems = repository.getTopItems(getStartOfMonth()).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val restaurantInsights = repository.getRestaurantInsights(getStartOfMonth()).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val prefs = context.getSharedPreferences("eatup_prefs", Context.MODE_PRIVATE)
     private val _googleSheetsUrl = MutableStateFlow(prefs.getString("google_sheets_url", "") ?: "")
@@ -62,6 +63,11 @@ class SalesViewModel(
 
     fun setHistoryDate(date: Long?) { _historyDate.value = date }
 
+    private val _historyMonth = MutableStateFlow(getStartOfMonth())
+    val historyMonth = _historyMonth.asStateFlow()
+
+    fun setHistoryMonth(millis: Long) { _historyMonth.value = millis }
+
     fun getLineItemsForOrder(orderId: Long) = repository.getLineItemsForOrder(orderId)
 
     private val _selectedItems = MutableStateFlow<Map<MenuItemEntity, Int>>(emptyMap())
@@ -78,14 +84,23 @@ class SalesViewModel(
 
     fun setEditOrderDate(millis: Long) { _editOrderDate.value = millis }
 
-    fun addRestaurant(name: String) = viewModelScope.launch { repository.insertRestaurant(name) }
+    fun addRestaurant(name: String) = viewModelScope.launch { 
+        repository.insertRestaurant(name)
+        backupToCloud()
+    }
     fun deleteRestaurant(restaurant: RestaurantEntity) = viewModelScope.launch { repository.deleteRestaurant(restaurant) }
 
     fun addMenuItem(restaurantId: Long, name: String, cost: Double, list: Double) = 
-        viewModelScope.launch { repository.insertMenuItem(restaurantId, name, cost, list) }
+        viewModelScope.launch { 
+            repository.insertMenuItem(restaurantId, name, cost, list)
+            backupToCloud()
+        }
     
     fun editMenuItem(item: MenuItemEntity) = 
-        viewModelScope.launch { repository.updateMenuItem(item) }
+        viewModelScope.launch { 
+            repository.updateMenuItem(item)
+            backupToCloud()
+        }
 
     fun deleteMenuItem(item: MenuItemEntity) = viewModelScope.launch { repository.deleteMenuItem(item) }
 
@@ -124,7 +139,7 @@ class SalesViewModel(
         triggerSync()
     }
 
-    // Editing Logic
+    // Editing Logic: Refined for v13.6 to handle deep-link recovery
     fun startEditingOrder(orderId: Long) {
         viewModelScope.launch {
             val orders = repository.getAllOrders().first()
@@ -136,15 +151,30 @@ class SalesViewModel(
             }
 
             val lineItems = repository.getLineItemsForOrder(orderId).first()
-            val menuItems = repository.getAllMenuItems().first()
+            val catalogItems = repository.getAllMenuItems().first()
             
             val newSelection = mutableMapOf<MenuItemEntity, Int>()
             lineItems.forEach { line ->
-                val menu = menuItems.find { it.id == line.menuItemId }
-                if (menu != null) newSelection[menu] = line.quantity
-                else {
-                   val tempMenu = MenuItemEntity(id = line.menuItemId, restaurantId = 0, name = line.itemName, costPrice = line.costPriceAtTime, listPrice = line.listPriceAtTime)
-                   newSelection[tempMenu] = line.quantity
+                // Priority 1: Match by ID
+                var menuMatch = catalogItems.find { it.id == line.menuItemId }
+                
+                // Priority 2: Match by Name (Recovery Logic for Restored Data)
+                if (menuMatch == null) {
+                   menuMatch = catalogItems.find { it.name.equals(line.itemName, ignoreCase = true) }
+                }
+
+                if (menuMatch != null) {
+                    newSelection[menuMatch] = line.quantity
+                } else {
+                    // Scenario: Legacy item not in catalog - Create temporary object for UI persistence
+                    val ghostItem = MenuItemEntity(
+                        id = line.menuItemId,
+                        restaurantId = 0,
+                        name = line.itemName,
+                        costPrice = line.costPriceAtTime,
+                        listPrice = line.listPriceAtTime
+                    )
+                    newSelection[ghostItem] = line.quantity
                 }
             }
             _selectedItems.value = newSelection
@@ -167,7 +197,6 @@ class SalesViewModel(
             val orders = repository.getAllOrders().first()
             val order = orders.find { it.id == orderId }
             if (order != null) {
-                // Send explicit delete request to cloud
                 val retrofit = Retrofit.Builder()
                     .baseUrl("https://script.google.com/")
                     .addConverterFactory(GsonConverterFactory.create())
@@ -248,7 +277,7 @@ class SalesViewModel(
         val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
         val syncRequest = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(constraints)
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, WorkRequest.MIN_BACKOFF_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, WorkRequest.MIN_BACKOFF_MILLIS, TimeUnit.MILLISECONDS)
             .build()
         workManager.enqueueUniqueWork("google_sheets_sync", ExistingWorkPolicy.REPLACE, syncRequest)
     }
@@ -271,6 +300,16 @@ class SalesViewModel(
     }
 
     fun dismissUpdate() { _updateInfo.value = null }
+
+    private fun getStartOfMonth(): Long {
+        val calendar = Calendar.getInstance()
+        calendar.set(Calendar.DAY_OF_MONTH, 1)
+        calendar.set(Calendar.HOUR_OF_DAY, 0)
+        calendar.set(Calendar.MINUTE, 0)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        return calendar.timeInMillis
+    }
 }
 
 class SalesViewModelFactory(

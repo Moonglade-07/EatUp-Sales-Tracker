@@ -88,6 +88,17 @@ class SalesRepository(private val salesDao: SalesDao) {
 
     suspend fun resetSyncStatus() = salesDao.markAllAsUnsynced()
 
+    // Resequence Logic: Fixes Order IDs 1, 2, 3... for a specific date
+    suspend fun resequenceOrdersForDate(date: Long) {
+        val orders = salesDao.getOrdersForDateOnce(date)
+        orders.forEachIndexed { index, order ->
+            val correctNumber = index + 1
+            if (order.dailyOrderNumber != correctNumber) {
+                salesDao.updateOrderNumber(order.id, correctNumber)
+            }
+        }
+    }
+
     suspend fun updateOrder(
         orderId: Long,
         itemsWithNames: List<Triple<MenuItemEntity, String, Int>>,
@@ -100,9 +111,25 @@ class SalesRepository(private val salesDao: SalesDao) {
         
         val currentOrders = salesDao.getAllOrders().first()
         val currentOrder = currentOrders.find { it.id == orderId } ?: return
+        
+        val oldDate = currentOrder.date
 
-        val newTimestamp = customTimestamp ?: currentOrder.timestamp
-        val newDate = getStartOfDay(newTimestamp)
+        // TIME-MERGE LOGIC: Combine NEW DATE with ORIGINAL HOUR/MINUTE
+        val finalTimestamp = if (customTimestamp != null) {
+            val originalCal = Calendar.getInstance().apply { timeInMillis = currentOrder.timestamp }
+            val newCal = Calendar.getInstance().apply { 
+                timeInMillis = customTimestamp
+                set(Calendar.HOUR_OF_DAY, originalCal.get(Calendar.HOUR_OF_DAY))
+                set(Calendar.MINUTE, originalCal.get(Calendar.MINUTE))
+                set(Calendar.SECOND, originalCal.get(Calendar.SECOND))
+                set(Calendar.MILLISECOND, originalCal.get(Calendar.MILLISECOND))
+            }
+            newCal.timeInMillis
+        } else {
+            currentOrder.timestamp
+        }
+        
+        val newDate = getStartOfDay(finalTimestamp)
 
         val newLineItems = itemsWithNames.map { (menuItem, restaurantName, qty) ->
             totalCost += menuItem.costPrice * qty
@@ -122,7 +149,7 @@ class SalesRepository(private val salesDao: SalesDao) {
 
         val updatedOrder = currentOrder.copy(
             date = newDate,
-            timestamp = newTimestamp,
+            timestamp = finalTimestamp,
             deliveryCharge = deliveryCharge,
             discount = discount,
             totalCostPrice = totalCost,
@@ -134,11 +161,26 @@ class SalesRepository(private val salesDao: SalesDao) {
         salesDao.deleteLineItemsForOrder(orderId)
         salesDao.updateOrder(updatedOrder)
         newLineItems.forEach { salesDao.insertLineItem(it) }
+
+        // RESEQUENCE BOTH DAYS: Old date and new date
+        resequenceOrdersForDate(oldDate)
+        if (newDate != oldDate) {
+            resequenceOrdersForDate(newDate)
+        }
     }
 
     suspend fun deleteOrderLocally(orderId: Long) {
+        val orders = salesDao.getAllOrders().first()
+        val order = orders.find { it.id == orderId }
+        val orderDate = order?.date
+        
         salesDao.deleteLineItemsForOrder(orderId)
         salesDao.deleteOrder(orderId)
+        
+        // Fix the "Gap" left by the deleted order
+        if (orderDate != null) {
+            resequenceOrdersForDate(orderDate)
+        }
     }
 
     suspend fun clearAllData() {
@@ -150,30 +192,59 @@ class SalesRepository(private val salesDao: SalesDao) {
     suspend fun restoreData(response: CloudRestoreResponse) {
         clearAllData()
         
-        val restaurantIdMap = mutableMapOf<Long, Long>()
-        response.restaurants.forEach { oldRest ->
-            val newId = salesDao.insertRestaurant(oldRest.copy(id = 0))
-            restaurantIdMap[oldRest.id] = newId
+        val restaurantNameMap = mutableMapOf<String, Long>()
+        if (response.restaurants.isNotEmpty()) {
+            response.restaurants.forEach { oldRest ->
+                val newId = salesDao.insertRestaurant(RestaurantEntity(name = oldRest.name))
+                restaurantNameMap[oldRest.name] = newId
+            }
+
+            response.menuItems.forEach { oldItem ->
+                val oldRestaurant = response.restaurants.find { it.id == oldItem.restaurantId }
+                val newRestaurantId = if (oldRestaurant != null) restaurantNameMap[oldRestaurant.name] else null
+                if (newRestaurantId != null) {
+                    salesDao.insertMenuItem(oldItem.copy(id = 0, restaurantId = newRestaurantId))
+                }
+            }
         }
 
-        response.menuItems.forEach { oldItem ->
-            val newRestId = restaurantIdMap[oldItem.restaurantId]
-            if (newRestId != null) {
-                salesDao.insertMenuItem(oldItem.copy(id = 0, restaurantId = newRestId))
+        if (restaurantNameMap.isEmpty() && response.lineItems.isNotEmpty()) {
+            response.lineItems.forEach { line ->
+                if (!restaurantNameMap.containsKey(line.restaurantName)) {
+                    val newId = salesDao.insertRestaurant(RestaurantEntity(name = line.restaurantName))
+                    restaurantNameMap[line.restaurantName] = newId
+                }
+                val restId = restaurantNameMap[line.restaurantName]!!
+                val currentItems = salesDao.getAllMenuItems().first()
+                if (currentItems.none { it.name == line.itemName && it.restaurantId == restId }) {
+                    salesDao.insertMenuItem(MenuItemEntity(
+                        restaurantId = restId,
+                        name = line.itemName,
+                        costPrice = line.costPriceAtTime,
+                        listPrice = line.listPriceAtTime
+                    ))
+                }
             }
         }
 
         val orderSyncMap = mutableMapOf<String, Long>()
         response.orders.forEach { oldOrder ->
-            val newOrderId = salesDao.insertOrder(oldOrder.copy(id = 0))
-            orderSyncMap[oldOrder.syncId] = newOrderId
+            if (!orderSyncMap.containsKey(oldOrder.syncId)) {
+                val newOrderId = salesDao.insertOrder(oldOrder.copy(id = 0))
+                orderSyncMap[oldOrder.syncId] = newOrderId
+            }
         }
 
+        val newlyCreatedMenuItems = salesDao.getAllMenuItems().first()
         response.lineItems.forEach { item ->
-            val parentOrderId = orderSyncMap[item.syncId] ?: return@forEach
+            val parentId = orderSyncMap[item.syncId] ?: return@forEach
+            val catalogMatch = newlyCreatedMenuItems.find { 
+                it.name.equals(item.itemName, ignoreCase = true) && 
+                restaurantNameMap[item.restaurantName] == it.restaurantId 
+            }
             salesDao.insertLineItem(OrderLineItemEntity(
-                orderId = parentOrderId,
-                menuItemId = 0,
+                orderId = parentId,
+                menuItemId = catalogMatch?.id ?: 0,
                 itemName = item.itemName,
                 restaurantName = item.restaurantName,
                 quantity = item.quantity,
@@ -187,11 +258,11 @@ class SalesRepository(private val salesDao: SalesDao) {
 
     fun getAllLineItems(): Flow<List<OrderLineItemEntity>> = salesDao.getAllLineItems()
 
-    fun getTopItems(): Flow<List<ItemInsight>> = salesDao.getTopItemsByProfit()
+    fun getTopItems(startDate: Long): Flow<List<ItemInsight>> = salesDao.getTopItemsBySales(startDate)
     
-    fun getRestaurantInsights(): Flow<List<RestaurantInsight>> = salesDao.getRestaurantInsights()
+    fun getRestaurantInsights(startDate: Long): Flow<List<RestaurantInsight>> = salesDao.getRestaurantInsightsBySales(startDate)
 
-    private fun getStartOfDay(millis: Long): Long {
+    fun getStartOfDay(millis: Long): Long {
         val calendar = Calendar.getInstance()
         calendar.timeInMillis = millis
         calendar.set(Calendar.HOUR_OF_DAY, 0)

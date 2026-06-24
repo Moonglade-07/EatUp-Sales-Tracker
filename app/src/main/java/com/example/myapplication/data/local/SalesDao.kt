@@ -29,7 +29,7 @@ interface SalesDao {
     @Delete
     suspend fun deleteMenuItem(item: MenuItemEntity)
 
-    @Query("SELECT * FROM orders WHERE date = :date ORDER BY dailyOrderNumber ASC")
+    @Query("SELECT * FROM orders WHERE date = :date")
     fun getOrdersForDate(date: Long): Flow<List<OrderEntity>>
 
     @Query("SELECT MAX(dailyOrderNumber) FROM orders WHERE date = :date")
@@ -37,8 +37,8 @@ interface SalesDao {
 
     @Transaction
     suspend fun insertOrderWithItems(order: OrderEntity, items: List<OrderLineItemEntity>) {
-        val orderId = insertOrder(order)
-        items.forEach { insertLineItem(it.copy(orderId = orderId)) }
+        val id = insertOrder(order)
+        items.forEach { insertLineItem(it.copy(orderId = id)) }
     }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -49,11 +49,11 @@ interface SalesDao {
 
     @Query("SELECT * FROM order_line_items WHERE orderId = :orderId")
     fun getLineItemsForOrder(orderId: Long): Flow<List<OrderLineItemEntity>>
-    
-    @Query("SELECT * FROM orders ORDER BY timestamp DESC")
+
+    @Query("SELECT * FROM orders")
     fun getAllOrders(): Flow<List<OrderEntity>>
 
-    @Query("SELECT * FROM orders WHERE isSynced = 0 ORDER BY timestamp ASC")
+    @Query("SELECT * FROM orders WHERE isSynced = 0")
     suspend fun getUnsyncedOrders(): List<OrderEntity>
 
     @Query("UPDATE orders SET isSynced = 1 WHERE id = :orderId")
@@ -71,6 +71,12 @@ interface SalesDao {
     @Query("DELETE FROM orders WHERE id = :orderId")
     suspend fun deleteOrder(orderId: Long)
 
+    @Query("UPDATE orders SET dailyOrderNumber = :newNumber, isSynced = 0 WHERE id = :orderId")
+    suspend fun updateOrderNumber(orderId: Long, newNumber: Int)
+
+    @Query("SELECT * FROM orders WHERE date = :date ORDER BY timestamp ASC")
+    suspend fun getOrdersForDateOnce(date: Long): List<OrderEntity>
+
     @Query("DELETE FROM restaurants")
     suspend fun clearRestaurants()
 
@@ -84,22 +90,27 @@ interface SalesDao {
     fun getAllLineItems(): Flow<List<OrderLineItemEntity>>
 
     @Query("""
-        SELECT itemName as name, SUM(quantity) as count, SUM((listPriceAtTime - costPriceAtTime) * quantity) as profit 
+        SELECT itemName as name, restaurantName, SUM(quantity) as count, SUM(listPriceAtTime * quantity) as salesAmount 
         FROM order_line_items 
-        GROUP BY menuItemId 
-        ORDER BY profit DESC 
-        LIMIT 5
+        INNER JOIN orders ON order_line_items.orderId = orders.id
+        WHERE orders.date >= :startDate
+        GROUP BY itemName, restaurantName 
+        ORDER BY salesAmount DESC 
+        LIMIT 10
     """)
-    fun getTopItemsByProfit(): Flow<List<ItemInsight>>
+    fun getTopItemsBySales(startDate: Long): Flow<List<ItemInsight>>
 
     @Query("""
-        SELECT restaurantName as name, COUNT(DISTINCT orderId) as count, SUM((listPriceAtTime - costPriceAtTime) * quantity) as profit 
+        SELECT restaurantName as name, COUNT(DISTINCT orderId) as count, SUM(listPriceAtTime * quantity) as salesAmount 
         FROM order_line_items 
+        INNER JOIN orders ON order_line_items.orderId = orders.id
+        WHERE orders.date >= :startDate
         GROUP BY restaurantName 
-        ORDER BY profit DESC
+        ORDER BY salesAmount DESC 
+        LIMIT 5
     """)
-    fun getRestaurantInsights(): Flow<List<RestaurantInsight>>
+    fun getRestaurantInsightsBySales(startDate: Long): Flow<List<RestaurantInsight>>
 }
 
-data class ItemInsight(val name: String, val count: Int, val profit: Double)
-data class RestaurantInsight(val name: String, val count: Int, val profit: Double)
+data class ItemInsight(val name: String, val restaurantName: String, val count: Int, val salesAmount: Double)
+data class RestaurantInsight(val name: String, val count: Int, val salesAmount: Double)

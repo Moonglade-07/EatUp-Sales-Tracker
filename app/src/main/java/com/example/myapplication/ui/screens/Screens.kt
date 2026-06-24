@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -69,7 +71,7 @@ fun DashboardScreen(
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
-            SummaryCard(orders.size, totalSales, totalProfit)
+            SummaryCard(orders.size, totalSales, totalProfit, title = "Today's Overview")
             
             Spacer(modifier = Modifier.height(24.dp))
             Text("Today's Orders", style = MaterialTheme.typography.titleMedium)
@@ -99,7 +101,7 @@ fun DashboardScreen(
 }
 
 @Composable
-fun SummaryCard(count: Int, sales: Double, profit: Double, title: String = "Today's Overview") {
+fun SummaryCard(count: Int, sales: Double, profit: Double, title: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -324,7 +326,6 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                             confirmButton = {
                                 Button(onClick = { 
                                     viewModel.editMenuItem(item.copy(name = editName, costPrice = editCost.toDoubleOrNull() ?: item.costPrice, listPrice = editList.toDoubleOrNull() ?: item.listPrice))
-                                    viewModel.backupToCloud()
                                     showEditItem = false 
                                 }) { Text("Update") }
                             },
@@ -346,7 +347,6 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                 Button(onClick = { 
                     if (name.isNotBlank()) { 
                         viewModel.addRestaurant(name)
-                        viewModel.backupToCloud()
                         showAddRestaurant = false 
                     } 
                 }) { Text("Save") }
@@ -408,7 +408,6 @@ fun CatalogScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             confirmButton = {
                 Button(onClick = { 
                     viewModel.addMenuItem(selectedRestId, name, cost.toDoubleOrNull() ?: 0.0, list.toDoubleOrNull() ?: 0.0)
-                    viewModel.backupToCloud()
                     showAddItem = false 
                 }) { Text("Save") }
             },
@@ -676,46 +675,65 @@ fun HistoryScreen(
 ) {
     val allOrders by viewModel.allOrders.collectAsState()
     val selectedDateMillis by viewModel.historyDate.collectAsState()
+    val selectedMonthMillis by viewModel.historyMonth.collectAsState()
+    
     var showDatePicker by remember { mutableStateOf(false) }
+    var showMonthPicker by remember { mutableStateOf(false) }
 
-    val filteredOrders = remember(allOrders, selectedDateMillis) {
-        if (selectedDateMillis == null) allOrders
-        else {
+    val filteredOrders = remember(allOrders, selectedDateMillis, selectedMonthMillis) {
+        if (selectedDateMillis != null) {
             val start = getStartOfDay(selectedDateMillis!!)
             allOrders.filter { it.date == start }
+        } else {
+            val cal = Calendar.getInstance().apply { timeInMillis = selectedMonthMillis }
+            val year = cal.get(Calendar.YEAR)
+            val month = cal.get(Calendar.MONTH)
+            
+            allOrders.filter { order ->
+                val oCal = Calendar.getInstance().apply { timeInMillis = order.date }
+                oCal.get(Calendar.YEAR) == year && oCal.get(Calendar.MONTH) == month
+            }
         }
     }
 
     val totalProfit = filteredOrders.sumOf { it.profit }
     val totalSales = filteredOrders.sumOf { it.totalListPrice + it.deliveryCharge - it.discount }
     
+    val summaryTitle = when {
+        selectedDateMillis != null -> "Day Summary (${SimpleDateFormat("dd MMM", Locale.getDefault()).format(Date(selectedDateMillis!!))})"
+        else -> "${SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(selectedMonthMillis))} Summary"
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (selectedDateMillis == null) "Full History" else SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(selectedDateMillis!!))) },
+                title = { Text("Order History") },
                 navigationIcon = { IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, null) } },
                 actions = {
+                    IconButton(onClick = { showMonthPicker = true }) { Icon(Icons.Default.CalendarViewMonth, contentDescription = "Pick Month") }
                     IconButton(onClick = { showDatePicker = true }) { Icon(Icons.Default.CalendarToday, contentDescription = "Pick Date") }
-                    IconButton(onClick = { viewModel.exportData() }) { Icon(Icons.Default.FileDownload, contentDescription = "Export") }
                 }
             )
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).padding(16.dp)) {
             SummaryCard(
-                filteredOrders.size, 
-                totalSales, 
-                totalProfit, 
-                title = if (selectedDateMillis == null) "Lifetime Summary" else "Day Summary"
+                count = filteredOrders.size, 
+                sales = totalSales, 
+                profit = totalProfit, 
+                title = summaryTitle
             )
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            if (selectedDateMillis != null) {
+            if (selectedDateMillis != null || Calendar.getInstance().apply { timeInMillis = selectedMonthMillis }.get(Calendar.MONTH) != Calendar.getInstance().get(Calendar.MONTH)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { viewModel.setHistoryDate(null) }) {
+                    TextButton(onClick = { 
+                        viewModel.setHistoryDate(null)
+                        viewModel.setHistoryMonth(Calendar.getInstance().timeInMillis)
+                    }) {
                         Icon(Icons.Default.Clear, null)
-                        Text("Clear Date Filter")
+                        Text("Reset Filters")
                     }
                 }
             }
@@ -747,6 +765,71 @@ fun HistoryScreen(
             DatePicker(state = datePickerState)
         }
     }
+
+    if (showMonthPicker) {
+        MonthYearPickerDialog(
+            initialDate = selectedMonthMillis,
+            onDismiss = { showMonthPicker = false },
+            onDateSelected = { 
+                viewModel.setHistoryDate(null)
+                viewModel.setHistoryMonth(it)
+                showMonthPicker = false
+            }
+        )
+    }
+}
+
+@Composable
+fun MonthYearPickerDialog(initialDate: Long, onDismiss: () -> Unit, onDateSelected: (Long) -> Unit) {
+    val cal = Calendar.getInstance().apply { timeInMillis = initialDate }
+    var selectedMonth by remember { mutableStateOf(cal.get(Calendar.MONTH)) }
+    var selectedYear by remember { mutableStateOf(cal.get(Calendar.YEAR)) }
+    
+    val months = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Month & Year") },
+        text = {
+            Column {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    // Simple Month Selector
+                    var monthExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { monthExpanded = true }) { Text(months[selectedMonth]) }
+                        DropdownMenu(expanded = monthExpanded, onDismissRequest = { monthExpanded = false }) {
+                            months.forEachIndexed { index, name ->
+                                DropdownMenuItem(text = { Text(name) }, onClick = { selectedMonth = index; monthExpanded = false })
+                            }
+                        }
+                    }
+                    // Simple Year Selector
+                    var yearExpanded by remember { mutableStateOf(false) }
+                    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+                    val years = (currentYear - 2..currentYear + 1).toList()
+                    Box {
+                        TextButton(onClick = { yearExpanded = true }) { Text("$selectedYear") }
+                        DropdownMenu(expanded = yearExpanded, onDismissRequest = { yearExpanded = false }) {
+                            years.forEach { year ->
+                                DropdownMenuItem(text = { Text("$year") }, onClick = { selectedYear = year; yearExpanded = false })
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val result = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, selectedYear)
+                    set(Calendar.MONTH, selectedMonth)
+                    set(Calendar.DAY_OF_MONTH, 1)
+                }
+                onDateSelected(result.timeInMillis)
+            }) { Text("Select") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -758,31 +841,32 @@ fun InsightsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Business Insights") },
+                title = { Text("Top Performers (Monthly)") },
                 navigationIcon = { IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, null) } }
             )
         }
     ) { padding ->
         LazyColumn(modifier = Modifier.padding(padding).padding(16.dp)) {
             item {
-                Text("Top 5 Items (by Profit)", style = MaterialTheme.typography.titleMedium)
+                Text("Top 10 Items (by Sales)", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
             }
             items(topItems) { item ->
                 Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                     Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
+                            Text(item.restaurantName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                             Text(item.name, fontWeight = FontWeight.Bold)
                             Text("Orders: ${item.count}", style = MaterialTheme.typography.bodySmall)
                         }
-                        Text("₹${"%.2f".format(item.profit)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(item.salesAmount)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
             
             item {
                 Spacer(modifier = Modifier.height(24.dp))
-                Text("Restaurant Performance", style = MaterialTheme.typography.titleMedium)
+                Text("Top 5 Restaurants (by Sales)", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
             }
             items(restInsights) { rest ->
@@ -792,52 +876,10 @@ fun InsightsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
                             Text(rest.name, fontWeight = FontWeight.Bold)
                             Text("Total Orders: ${rest.count}", style = MaterialTheme.typography.bodySmall)
                         }
-                        Text("₹${"%.2f".format(rest.profit)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(rest.salesAmount)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
                     }
                 }
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ClosingReportScreen(viewModel: SalesViewModel, onBack: () -> Unit) {
-    val orders by viewModel.todayOrders.collectAsState()
-    val totalProfit = orders.sumOf { it.profit }
-    val totalSales = orders.sumOf { it.totalListPrice + it.deliveryCharge - it.discount }
-    
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Daily Closing Report") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } }
-            )
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Day Successfully Closed!", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text(SimpleDateFormat("EEEE, MMM dd", Locale.getDefault()).format(Date()), color = MaterialTheme.colorScheme.secondary)
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            SummaryCard(orders.size, totalSales, totalProfit, title = "Final Summary")
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            Button(
-                onClick = { viewModel.exportData() },
-                modifier = Modifier.fillMaxWidth().height(56.dp)
-            ) {
-                Icon(Icons.Default.FileDownload, null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Export Final Report to Excel")
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Note: This will save a CSV file in your Downloads folder.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -861,7 +903,7 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             )
         }
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).padding(16.dp)) {
+        Column(modifier = Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState())) {
             Text("Cloud Synchronization", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -894,6 +936,25 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             HorizontalDivider()
             Spacer(modifier = Modifier.height(32.dp))
             
+            Text("Catalog Mirror", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    viewModel.backupToCloud()
+                    scope.launch { snackbarHostState.showSnackbar("Syncing catalog to Cloud...") }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Icon(Icons.Default.CloudUpload, null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Sync Catalog to Cloud")
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(32.dp))
+
             Text("Cloud Recovery", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Button(
@@ -943,7 +1004,7 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
     }
 }
 
-private fun getStartOfDay(millis: Long): Long {
+fun getStartOfDay(millis: Long): Long {
     val calendar = Calendar.getInstance()
     calendar.timeInMillis = millis
     calendar.set(Calendar.HOUR_OF_DAY, 0)
@@ -984,7 +1045,7 @@ fun DashboardPreview() {
     MyApplicationTheme {
         Surface {
             Column(modifier = Modifier.padding(16.dp).fillMaxSize()) {
-                SummaryCard(2, 450.0, 120.0)
+                SummaryCard(2, 450.0, 120.0, title = "Today's Overview")
                 Spacer(modifier = Modifier.height(24.dp))
                 Text("Today's Orders", style = MaterialTheme.typography.titleMedium)
                 Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {

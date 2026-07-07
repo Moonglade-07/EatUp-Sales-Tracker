@@ -70,3 +70,28 @@ data class OrderLineItemEntity(
     val costPriceAtTime: Double,
     val listPriceAtTime: Double
 )
+
+// --- Growth Analytics Data Classes ---
+
+data class DailyVelocity(
+    val date: Long,
+    val totalSales: Double,
+    val totalProfit: Double
+)
+
+data class WeekdayAverage(
+    val dayOfWeek: Int, // 0=Sunday, 1=Monday... 6=Saturday
+    val avgSales: Double,
+    val avgProfit: Double
+)
+
+data class MonthlyTrend(
+    val monthYear: String, // YYYY-MM
+    val totalSales: Double
+)
+
+data class BundleOpportunity(
+    val itemA: String,
+    val itemB: String,
+    val count: Int
+)

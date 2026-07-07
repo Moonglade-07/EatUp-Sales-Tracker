@@ -93,23 +93,96 @@ interface SalesDao {
         SELECT itemName as name, restaurantName, SUM(quantity) as count, SUM(listPriceAtTime * quantity) as salesAmount 
         FROM order_line_items 
         INNER JOIN orders ON order_line_items.orderId = orders.id
-        WHERE orders.date >= :startDate
+        WHERE strftime('%Y-%m', datetime(timestamp / 1000, 'unixepoch', '+5 hours', '30 minutes')) IN (:monthYears)
         GROUP BY itemName, restaurantName 
         ORDER BY salesAmount DESC 
         LIMIT 10
     """)
-    fun getTopItemsBySales(startDate: Long): Flow<List<ItemInsight>>
+    fun getTopItemsBySalesMulti(monthYears: List<String>): Flow<List<ItemInsight>>
 
     @Query("""
         SELECT restaurantName as name, COUNT(DISTINCT orderId) as count, SUM(listPriceAtTime * quantity) as salesAmount 
         FROM order_line_items 
         INNER JOIN orders ON order_line_items.orderId = orders.id
-        WHERE orders.date >= :startDate
+        WHERE strftime('%Y-%m', datetime(timestamp / 1000, 'unixepoch', '+5 hours', '30 minutes')) IN (:monthYears)
         GROUP BY restaurantName 
         ORDER BY salesAmount DESC 
         LIMIT 5
     """)
-    fun getRestaurantInsightsBySales(startDate: Long): Flow<List<RestaurantInsight>>
+    fun getRestaurantInsightsBySalesMulti(monthYears: List<String>): Flow<List<RestaurantInsight>>
+
+    @Query("""
+        SELECT restaurantName as name, COUNT(DISTINCT orderId) as count, SUM((listPriceAtTime - costPriceAtTime) * quantity) as salesAmount 
+        FROM order_line_items 
+        INNER JOIN orders ON order_line_items.orderId = orders.id
+        WHERE strftime('%Y-%m', datetime(timestamp / 1000, 'unixepoch', '+5 hours', '30 minutes')) IN (:monthYears)
+        GROUP BY restaurantName 
+        ORDER BY salesAmount DESC 
+        LIMIT 5
+    """)
+    fun getRestaurantInsightsByProfitMulti(monthYears: List<String>): Flow<List<RestaurantInsight>>
+
+    // --- Growth Analytics Queries ---
+
+    @Query("""
+        SELECT date, SUM(totalListPrice + deliveryCharge - discount) as totalSales, SUM(profit) as totalProfit 
+        FROM orders 
+        WHERE date >= :startDate AND date <= :endDate
+        GROUP BY date 
+        ORDER BY date ASC
+    """)
+    fun getWeeklyVelocity(startDate: Long, endDate: Long): Flow<List<DailyVelocity>>
+
+    @Query("""
+        SELECT 
+            CAST(strftime('%w', datetime(date / 1000, 'unixepoch')) AS INTEGER) as dayOfWeek,
+            AVG(dailyTotalSales) as avgSales,
+            AVG(dailyTotalProfit) as avgProfit
+        FROM (
+            SELECT 
+                date,
+                SUM(totalListPrice + deliveryCharge - discount) as dailyTotalSales,
+                SUM(profit) as dailyTotalProfit
+            FROM orders
+            WHERE date >= :startDate AND date <= :endDate
+            GROUP BY date
+        )
+        GROUP BY dayOfWeek
+        ORDER BY dayOfWeek ASC
+    """)
+    fun getWeekdayAverages(startDate: Long, endDate: Long): Flow<List<WeekdayAverage>>
+
+    @Query("""
+        SELECT 
+            strftime('%Y-%m', datetime(timestamp / 1000, 'unixepoch', '+5 hours', '30 minutes')) as monthYear,
+            SUM(totalListPrice + deliveryCharge - discount) as totalSales
+        FROM orders
+        GROUP BY monthYear
+        ORDER BY monthYear ASC
+        LIMIT 12
+    """)
+    fun getMonthlyTrendsRolling(): Flow<List<MonthlyTrend>>
+
+    @Query("""
+        SELECT a.itemName as itemA, b.itemName as itemB, COUNT(*) as count 
+        FROM order_line_items a 
+        INNER JOIN order_line_items b ON a.orderId = b.orderId AND a.id < b.id 
+        GROUP BY itemA, itemB 
+        ORDER BY count DESC 
+        LIMIT 10
+    """)
+    fun getBundleOpportunities(): Flow<List<BundleOpportunity>>
+
+    @Query("""
+        SELECT itemName as name, restaurantName, SUM(quantity) as count, SUM((listPriceAtTime - costPriceAtTime) * quantity) as salesAmount 
+        FROM order_line_items 
+        INNER JOIN orders ON order_line_items.orderId = orders.id
+        WHERE strftime('%Y-%m', datetime(timestamp / 1000, 'unixepoch', '+5 hours', '30 minutes')) IN (:monthYears)
+        GROUP BY itemName, restaurantName 
+        ORDER BY salesAmount DESC 
+        LIMIT 10
+    """)
+    fun getTopItemsByProfitMulti(monthYears: List<String>): Flow<List<ItemInsight>>
 }
 
 data class ItemInsight(val name: String, val restaurantName: String, val count: Int, val salesAmount: Double)

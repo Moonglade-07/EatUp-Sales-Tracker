@@ -90,11 +90,11 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                             )
                             NavigationDrawerItem(
-                                icon = { Icon(Icons.Default.Insights, null) },
-                                label = { Text("Business Insights") },
-                                selected = currentRoute == "insights",
+                                icon = { Icon(Icons.Default.AutoGraph, null) },
+                                label = { Text("Growth Analytics") },
+                                selected = currentRoute == "analytics",
                                 onClick = {
-                                    navController.navigate("insights") { launchSingleTop = true }
+                                    navController.navigate("analytics") { launchSingleTop = true }
                                     scope.launch { drawerState.close() }
                                 },
                                 modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -160,8 +160,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
-                            composable("insights") {
-                                InsightsScreen(
+                            composable("analytics") {
+                                AnalyticsScreen(
                                     viewModel = viewModel,
                                     onMenuClick = { scope.launch { drawerState.open() } }
                                 )

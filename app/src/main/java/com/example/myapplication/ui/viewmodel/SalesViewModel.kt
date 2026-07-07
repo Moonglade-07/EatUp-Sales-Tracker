@@ -11,10 +11,12 @@ import com.example.myapplication.data.repository.SalesRepository
 import com.example.myapplication.util.AppVersionResponse
 import com.example.myapplication.util.ExportService
 import com.example.myapplication.util.UpdateManager
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -38,9 +40,61 @@ class SalesViewModel(
     val allOrders = repository.getAllOrders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val allLineItems = repository.getAllLineItems().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     
-    // Monthly Insights Logic
-    val topItems = repository.getTopItems(getStartOfMonth()).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val restaurantInsights = repository.getRestaurantInsights(getStartOfMonth()).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // --- Growth Analytics Range States ---
+
+    private val _analyticsWeeklyRange = MutableStateFlow(
+        Pair(System.currentTimeMillis() - (6 * 24 * 60 * 60 * 1000L), System.currentTimeMillis())
+    )
+    val analyticsWeeklyRange = _analyticsWeeklyRange.asStateFlow()
+
+    private val _analyticsWeekdayRange = MutableStateFlow(
+        Pair(0L, System.currentTimeMillis())
+    )
+    val analyticsWeekdayRange = _analyticsWeekdayRange.asStateFlow()
+
+    private val _analyticsSelectedMonths = MutableStateFlow<List<Long>>(listOf(getStartOfMonth()))
+    val analyticsSelectedMonths = _analyticsSelectedMonths.asStateFlow()
+
+    private val _analyticsSelectedRestMonths = MutableStateFlow<List<Long>>(listOf(getStartOfMonth()))
+    val analyticsSelectedRestMonths = _analyticsSelectedRestMonths.asStateFlow()
+
+    // --- Growth Analytics Flows ---
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val weeklyVelocity = analyticsWeeklyRange.flatMapLatest { range ->
+        repository.getWeeklyVelocity(repository.getStartOfDay(range.first), repository.getStartOfDay(range.second))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val weekdayAverages = analyticsWeekdayRange.flatMapLatest { range ->
+        repository.getWeekdayAverages(repository.getStartOfDay(range.first), repository.getStartOfDay(range.second))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val topItemsBySales = analyticsSelectedMonths.flatMapLatest { months ->
+        repository.getTopItemsMulti(months.map { toMonthYearString(it) })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val topItemsByProfit = analyticsSelectedMonths.flatMapLatest { months ->
+        repository.getTopItemsByProfitMulti(months.map { toMonthYearString(it) })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val restaurantInsightsBySales = analyticsSelectedRestMonths.flatMapLatest { months ->
+        repository.getRestaurantInsightsMulti(months.map { toMonthYearString(it) })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val restaurantInsightsByProfit = analyticsSelectedRestMonths.flatMapLatest { months ->
+        repository.getRestaurantInsightsByProfitMulti(months.map { toMonthYearString(it) })
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val monthlyTrends = repository.getMonthlyTrends()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val bundleOpportunities = repository.getBundleOpportunities()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val prefs = context.getSharedPreferences("eatup_prefs", Context.MODE_PRIVATE)
     private val _googleSheetsUrl = MutableStateFlow(prefs.getString("google_sheets_url", "") ?: "")
@@ -83,6 +137,48 @@ class SalesViewModel(
     val editOrderDate = _editOrderDate.asStateFlow()
 
     fun setEditOrderDate(millis: Long) { _editOrderDate.value = millis }
+
+    fun setWeeklyRange(startDate: Long) {
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = startDate
+        calendar.add(Calendar.DAY_OF_YEAR, 6)
+        _analyticsWeeklyRange.value = Pair(startDate, calendar.timeInMillis)
+    }
+
+    fun setWeekdayRange(startDate: Long, endDate: Long) {
+        _analyticsWeekdayRange.value = Pair(startDate, endDate)
+    }
+
+    fun togglePerformanceMonth(millis: Long) {
+        val current = _analyticsSelectedMonths.value.toMutableList()
+        if (current.contains(millis)) {
+            if (current.size > 1) current.remove(millis)
+        } else {
+            current.add(millis)
+        }
+        _analyticsSelectedMonths.value = current
+    }
+
+    fun toggleRestaurantMonth(millis: Long) {
+        val current = _analyticsSelectedRestMonths.value.toMutableList()
+        if (current.contains(millis)) {
+            if (current.size > 1) current.remove(millis)
+        } else {
+            current.add(millis)
+        }
+        _analyticsSelectedRestMonths.value = current
+    }
+
+    fun resetAnalyticsFilters() {
+        _analyticsWeeklyRange.value = Pair(System.currentTimeMillis() - (6 * 24 * 60 * 60 * 1000L), System.currentTimeMillis())
+        _analyticsWeekdayRange.value = Pair(0L, System.currentTimeMillis())
+        _analyticsSelectedMonths.value = listOf(getStartOfMonth())
+        _analyticsSelectedRestMonths.value = listOf(getStartOfMonth())
+    }
+
+    private fun toMonthYearString(millis: Long): String {
+        return SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date(millis))
+    }
 
     fun addRestaurant(name: String) = viewModelScope.launch { 
         repository.insertRestaurant(name)
@@ -303,6 +399,17 @@ class SalesViewModel(
 
     private fun getStartOfMonth(): Long {
         val calendar = Calendar.getInstance()
+        calendar.set(Calendar.DAY_OF_MONTH, 1)
+        calendar.set(Calendar.HOUR_OF_DAY, 0)
+        calendar.set(Calendar.MINUTE, 0)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        return calendar.timeInMillis
+    }
+
+    fun getStartOfThreeMonthsAgo(): Long {
+        val calendar = Calendar.getInstance()
+        calendar.add(Calendar.MONTH, -2)
         calendar.set(Calendar.DAY_OF_MONTH, 1)
         calendar.set(Calendar.HOUR_OF_DAY, 0)
         calendar.set(Calendar.MINUTE, 0)

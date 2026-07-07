@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import com.example.myapplication.ui.components.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.myapplication.data.local.*
@@ -833,53 +834,111 @@ fun MonthYearPickerDialog(initialDate: Long, onDismiss: () -> Unit, onDateSelect
     )
 }
 
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InsightsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
-    val topItems by viewModel.topItems.collectAsState()
-    val restInsights by viewModel.restaurantInsights.collectAsState()
+fun AnalyticsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Market Trends", "Performance")
+    
+    val weeklyData by viewModel.weeklyVelocity.collectAsState()
+    val weekdayAverages by viewModel.weekdayAverages.collectAsState()
+    val monthlyTrends by viewModel.monthlyTrends.collectAsState()
+    val topItemsByRevenue by viewModel.topItemsBySales.collectAsState()
+    val topItemsByProfit by viewModel.topItemsByProfit.collectAsState()
+    val restBySales by viewModel.restaurantInsightsBySales.collectAsState()
+    val restByProfit by viewModel.restaurantInsightsByProfit.collectAsState()
+    val bundles by viewModel.bundleOpportunities.collectAsState()
+
+    val weeklyRange by viewModel.analyticsWeeklyRange.collectAsState()
+    val weekdayRange by viewModel.analyticsWeekdayRange.collectAsState()
+    val selectedMonths by viewModel.analyticsSelectedMonths.collectAsState()
+    val selectedRestMonths by viewModel.analyticsSelectedRestMonths.collectAsState()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Top Performers (Monthly)") },
+                title = { Text("Growth Analytics") },
                 navigationIcon = { IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, null) } }
             )
         }
     ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding).padding(16.dp)) {
-            item {
-                Text("Top 10 Items (by Sales)", style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            items(topItems) { item ->
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(item.restaurantName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
-                            Text(item.name, fontWeight = FontWeight.Bold)
-                            Text("Orders: ${item.count}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text("₹${"%.2f".format(item.salesAmount)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
-                    }
+        Column(modifier = Modifier.padding(padding)) {
+            TabRow(selectedTabIndex = selectedTab) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(title) }
+                    )
                 }
             }
-            
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                Text("Top 5 Restaurants (by Sales)", style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-            items(restInsights) { rest ->
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(rest.name, fontWeight = FontWeight.Bold)
-                            Text("Total Orders: ${rest.count}", style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text("₹${"%.2f".format(rest.salesAmount)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.ExtraBold)
-                    }
+
+            Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+                if (selectedTab == 0) {
+                    // TAB 1: MARKET TRENDS
+                    AnalyticsRangeHeader(
+                        title = "Select 7-Day Window",
+                        currentRange = weeklyRange,
+                        onDateSelected = { viewModel.setWeeklyRange(it) },
+                        isWeekly = true,
+                        onReset = { viewModel.resetAnalyticsFilters() }
+                    )
+                    GroupedSalesBarChart(weeklyData)
+                    Spacer(Modifier.height(16.dp))
+                    
+                    AnalyticsRangeHeader(
+                        title = "Weekday Analysis Range",
+                        currentRange = weekdayRange,
+                        onDateSelected = { viewModel.setWeekdayRange(it, System.currentTimeMillis()) },
+                        onReset = { viewModel.resetAnalyticsFilters() },
+                        defaultStartText = "All Time"
+                    )
+                    WeekdayAvgChart(weekdayAverages)
+                    Spacer(Modifier.height(16.dp))
+                    
+                    HorizontalDivider()
+                    Spacer(Modifier.height(16.dp))
+
+                    RevenueTrendLineChart(monthlyTrends)
+                } else {
+                    // TAB 2: PERFORMANCE
+                    MultiMonthHeader(
+                        title = "Item Performance (Selected Months)",
+                        selectedMonths = selectedMonths,
+                        onToggleMonth = { viewModel.togglePerformanceMonth(it) },
+                        onReset = { viewModel.resetAnalyticsFilters() }
+                    )
+                    
+                    ItemInsightList("Top 10 Items by Revenue", topItemsByRevenue, false)
+                    Spacer(Modifier.height(16.dp))
+                    ItemInsightList("Top 10 Items by Profit", topItemsByProfit, true)
+                    
+                    Spacer(Modifier.height(32.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(32.dp))
+
+                    MultiMonthHeader(
+                        title = "Restaurant Strategy (Selected Months)",
+                        selectedMonths = selectedRestMonths,
+                        onToggleMonth = { viewModel.toggleRestaurantMonth(it) },
+                        onReset = { viewModel.resetAnalyticsFilters() }
+                    )
+
+                    RestaurantInsightList("Top 5 Restaurants by Sales", restBySales, false)
+                    Spacer(Modifier.height(16.dp))
+                    RestaurantInsightList("Top 5 Restaurants by Profit", restByProfit, true)
+
+                    Spacer(Modifier.height(32.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(32.dp))
+                    
+                    Text("Bundle Opportunities", style = MaterialTheme.typography.titleMedium)
+                    Text("Top 10 items frequently ordered together", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    bundles.forEach { BundleOpportunityCard(it) }
                 }
+                Spacer(Modifier.height(100.dp))
             }
         }
     }

@@ -738,5 +738,47 @@ function initializeNewMonthSheet(shTab) {
   shTab.setFrozenRows(1);
   shTab.hideColumns(9, 3);
 }
-function finalizeMonthlyReport() { addHardTotalAtomic(SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(), "MONTHLY TOTAL", "#1b5e20", "white", 1); }
+/**
+ * Specialized Month-End Engine.
+ * Sums EVERY order in the sheet regardless of section boundaries.
+ */
+function finalizeMonthlyReport() {
+  var ssObject = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetTab = ssObject.getActiveSheet();
+  var lastRowIdx = sheetTab.getLastRow();
+
+  // Phase 1: Nuclear Wipe of existing Monthly Totals to prevent stacking
+  var bColumnDisplayList = sheetTab.getRange("B:B").getDisplayValues().flat();
+  for (var i = lastRowIdx; i >= 1; i--) {
+    if (bColumnDisplayList[i-1] === "MONTHLY TOTAL") {
+      sheetTab.deleteRow(i);
+    }
+  }
+  SpreadsheetApp.flush();
+
+  // Phase 2: Aggregate EVERYTHING in the sheet
+  var fullMatrixData = sheetTab.getDataRange().getValues();
+  var monthlyAmt = 0, monthlyDel = 0, monthlyDisc = 0, monthlyProf = 0;
+
+  for (var k = 1; k < fullMatrixData.length; k++) {
+    var rowIdValue = fullMatrixData[k][0];
+    // We only sum rows that have a numeric ID (Actual Orders)
+    if (rowIdValue && !isNaN(rowIdValue) && rowIdValue > 0) {
+      monthlyAmt += cleanNum(fullMatrixData[k][4]);
+      monthlyDel += cleanNum(fullMatrixData[k][5]);
+      monthlyDisc += cleanNum(fullMatrixData[k][6]);
+      monthlyProf += cleanNum(fullMatrixData[k][7]);
+    }
+  }
+
+  // Phase 3: Insert the Definitive Summary at Row 2 (Immediately under Header)
+  sheetTab.insertRowBefore(2);
+  var summaryRangeObj = sheetTab.getRange(2, 1, 1, 11);
+  summaryRangeObj.setValues([["", "MONTHLY TOTAL", "", "", monthlyAmt, monthlyDel, monthlyDisc, monthlyProf, "", "", ""]])
+    .setBackground("#1b5e20")
+    .setFontColor("white")
+    .setFontWeight("bold");
+
+  SpreadsheetApp.getUi().alert("Monthly Report Finalized! Overall totals calculated for all days.");
+}
 function manualDuesRecalculation() { SpreadsheetApp.getUi().alert("Note: Logic is automatic. To force a full system healing audit, click FORCE REPAIR."); }

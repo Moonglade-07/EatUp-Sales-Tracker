@@ -67,7 +67,7 @@ class SalesRepository(private val salesDao: SalesDao) {
             )
         }
 
-        val profit = (totalList - totalCost) + deliveryCharge - discount
+        val profit = totalList - totalCost
 
         val order = OrderEntity(
             date = dateForOrder,
@@ -145,7 +145,7 @@ class SalesRepository(private val salesDao: SalesDao) {
             )
         }
 
-        val profit = (totalList - totalCost) + deliveryCharge - discount
+        val profit = totalList - totalCost
 
         val updatedOrder = currentOrder.copy(
             date = newDate,
@@ -258,9 +258,32 @@ class SalesRepository(private val salesDao: SalesDao) {
 
     fun getAllLineItems(): Flow<List<OrderLineItemEntity>> = salesDao.getAllLineItems()
 
-    fun getTopItems(startDate: Long): Flow<List<ItemInsight>> = salesDao.getTopItemsBySales(startDate)
+    fun getTopItemsMulti(monthYears: List<String>): Flow<List<ItemInsight>> = 
+        salesDao.getTopItemsBySalesMulti(monthYears)
+
+    fun getTopItemsByProfitMulti(monthYears: List<String>): Flow<List<ItemInsight>> = 
+        salesDao.getTopItemsByProfitMulti(monthYears)
     
-    fun getRestaurantInsights(startDate: Long): Flow<List<RestaurantInsight>> = salesDao.getRestaurantInsightsBySales(startDate)
+    fun getRestaurantInsightsMulti(monthYears: List<String>): Flow<List<RestaurantInsight>> = 
+        salesDao.getRestaurantInsightsBySalesMulti(monthYears)
+
+    fun getRestaurantInsightsByProfitMulti(monthYears: List<String>): Flow<List<RestaurantInsight>> = 
+        salesDao.getRestaurantInsightsByProfitMulti(monthYears)
+
+    fun getWeeklyVelocity(startDate: Long, endDate: Long): Flow<List<DailyVelocity>> = 
+        salesDao.getWeeklyVelocity(startDate, endDate)
+
+    fun getWeekdayAverages(startDate: Long, endDate: Long): Flow<List<WeekdayAverage>> = 
+        salesDao.getWeekdayAverages(startDate, endDate)
+
+    fun getMonthlyTrends(): Flow<List<MonthlyTrend>> = 
+        salesDao.getMonthlyTrendsRolling()
+
+    fun getBundleOpportunities(): Flow<List<BundleOpportunity>> = salesDao.getBundleOpportunities()
+
+    suspend fun getFirstOrderDate(): Long {
+        return salesDao.getAllOrders().first().minByOrNull { it.date }?.date ?: System.currentTimeMillis()
+    }
 
     fun getStartOfDay(millis: Long): Long {
         val calendar = Calendar.getInstance()

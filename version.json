@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "1.3.0",
-  "downloadUrl": "https://github.com/Moonglade-07/EatUp-Sales-Tracker/releases/download/v1.3.0/Eatup_v1.3.0.apk",
-  "releaseNotes": "v1.3.0 Release: Deep-Link Restore Fix, True-Time Backdating, Dynamic Version Detection, and high-speed Reverse-Search sync!"
+  "versionCode": 7,
+  "versionName": "1.5.0",
+  "downloadUrl": "https://github.com/Moonglade-07/EatUp-Sales-Tracker/releases/download/v1.5.0/Eatupv1.4.0.apk",
+  "releaseNotes": "EatUp Analytics Update: Advanced Multi-Month Selection, Accurate Weekday Averages, and Consolidated Growth Hub!"
 }

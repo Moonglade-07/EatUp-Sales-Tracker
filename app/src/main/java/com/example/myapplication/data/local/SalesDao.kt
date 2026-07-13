@@ -59,6 +59,9 @@ interface SalesDao {
     @Query("UPDATE orders SET isSynced = 1 WHERE id = :orderId")
     suspend fun markOrderAsSynced(orderId: Long)
 
+    @Query("UPDATE orders SET isSynced = 0 WHERE date = :dateInMillis")
+    suspend fun markDateAsUnsynced(dateInMillis: Long)
+
     @Query("UPDATE orders SET isSynced = 0")
     suspend fun markAllAsUnsynced()
 

@@ -113,6 +113,8 @@ class SyncWorker(
                     val response = api.syncOrder(syncUrl, request)
                     if (response.isSuccessful) {
                         dao.markOrderAsSynced(order.id)
+                        // Add delay to prevent Apps Script lock contention during batch resync
+                        kotlinx.coroutines.delay(1000)
                     } else {
                         allSuccess = false
                     }

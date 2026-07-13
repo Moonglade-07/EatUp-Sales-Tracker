@@ -1057,18 +1057,40 @@ fun SettingsScreen(viewModel: SalesViewModel, onMenuClick: () -> Unit) {
             )
 
             Spacer(modifier = Modifier.height(16.dp))
-            
+
+            var showResyncDatePicker by remember { mutableStateOf(false) }
+            val resyncDatePickerState = rememberDatePickerState()
+
             Button(
-                onClick = {
-                    viewModel.forceResync()
-                    scope.launch { snackbarHostState.showSnackbar("Re-syncing all data to Cloud...") }
-                },
+                onClick = { showResyncDatePicker = true },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
                 Icon(Icons.Default.CloudSync, null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Force Re-sync All Data")
+                Text("Force Re-sync Specific Date")
+            }
+
+            if (showResyncDatePicker) {
+                DatePickerDialog(
+                    onDismissRequest = { showResyncDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            resyncDatePickerState.selectedDateMillis?.let { date ->
+                                viewModel.forceResync(date)
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Re-syncing data for Selected Date...")
+                                }
+                            }
+                            showResyncDatePicker = false
+                        }) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showResyncDatePicker = false }) { Text("Cancel") }
+                    }
+                ) {
+                    DatePicker(state = resyncDatePickerState)
+                }
             }
         }
     }

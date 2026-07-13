@@ -105,9 +105,13 @@ class SalesViewModel(
         _googleSheetsUrl.value = url
     }
 
-    fun forceResync() {
+    fun forceResync(date: Long? = null) {
         viewModelScope.launch {
-            repository.resetSyncStatus()
+            if (date != null) {
+                repository.resetSyncStatusForDate(repository.getStartOfDay(date))
+            } else {
+                repository.resetSyncStatus()
+            }
             triggerSync()
         }
     }

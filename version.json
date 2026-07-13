@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.4.0",
-  "downloadUrl": "https://github.com/Moonglade-07/EatUp-Sales-Tracker/releases/download/v1.4.0/Eatupv1.4.0.apk",
-  "releaseNotes": "EatUp Analytics Update: Advanced Multi-Month Selection, Accurate Weekday Averages, and Consolidated Growth Hub!"
+  "versionCode": 8,
+  "versionName": "1.4.5",
+  "downloadUrl": "https://github.com/Moonglade-07/EatUp-Sales-Tracker/releases/download/v1.4.5/Eatupv1.4.5.apk",
+  "releaseNotes": "Targeted Re-sync Update: Force re-sync specific dates, unified profit calculation fixes, and consolidated Growth Analytics!"
 }

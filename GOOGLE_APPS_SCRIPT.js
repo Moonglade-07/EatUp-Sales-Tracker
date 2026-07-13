@@ -257,7 +257,7 @@ function doPost(e) {
   var lockObjectHandle = LockService.getScriptLock();
 
   try {
-    lockObjectHandle.waitLock(30000); // 30 second timeout queue
+    lockObjectHandle.waitLock(60000); // 60 second timeout queue (Boosted for batch resync)
     var requestDataPayload = JSON.parse(e.postData.contents);
     var activeSsInstanceObj = SpreadsheetApp.getActiveSpreadsheet();
 

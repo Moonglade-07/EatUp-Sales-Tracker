@@ -67,7 +67,7 @@ class SalesRepository(private val salesDao: SalesDao) {
             )
         }
 
-        val profit = totalList - totalCost
+        val profit = (totalList - totalCost) + deliveryCharge - discount
 
         val order = OrderEntity(
             date = dateForOrder,
@@ -87,6 +87,8 @@ class SalesRepository(private val salesDao: SalesDao) {
         salesDao.getLineItemsForOrder(orderId)
 
     suspend fun resetSyncStatus() = salesDao.markAllAsUnsynced()
+
+    suspend fun resetSyncStatusForDate(date: Long) = salesDao.markDateAsUnsynced(date)
 
     // Resequence Logic: Fixes Order IDs 1, 2, 3... for a specific date
     suspend fun resequenceOrdersForDate(date: Long) {
@@ -145,7 +147,7 @@ class SalesRepository(private val salesDao: SalesDao) {
             )
         }
 
-        val profit = totalList - totalCost
+        val profit = (totalList - totalCost) + deliveryCharge - discount
 
         val updatedOrder = currentOrder.copy(
             date = newDate,

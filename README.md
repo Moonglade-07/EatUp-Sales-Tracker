@@ -1,5 +1,5 @@
 # EatUp Sales Tracker 📱💰
-### Definitive Titan Maximum Edition (v1.4.5)
+### v1.4.5
 
 **EatUp Sales Tracker** is a professional-grade sales management and business intelligence suite designed specifically for food delivery entrepreneurs and small restaurant owners. It bridges the gap between traditional pen-and-paper ledgers and modern data analytics, offering an offline-first experience that syncs perfectly to the cloud.
 
@@ -12,7 +12,7 @@ Most small food businesses lose track of their true margins due to delivery fees
 
 ## ✨ Comprehensive Features
 
-### 📊 Growth Analytics Hub (Titan Update)
+### 📊 Growth Analytics Hub
 The analytics hub is the "brain" of the application, transforming raw data into strategic insights.
 - **Market Trends Tab**:
     - **Weekly Velocity**: Grouped bar charts showing side-by-side Sales and Profit for a rolling 7-day window.
